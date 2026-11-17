@@ -2,13 +2,13 @@
   "schemaVersion": "agent-system.extension-package.v1",
   "extensionId": "google-cloud-platform",
   "displayName": "Google Cloud Platform",
-  "version": "2.3.8",
+  "version": "2.0.1",
   "scope": "project",
-  "description": "Project-scoped Google Cloud CLI Docker runtime, browser-based gcloud auth login, and the gcloud_cli OpenCode Tool.",
+  "description": "Project-scoped Google Cloud login controls using the main OpenCode runtime and shared gcloud configuration; general gcloud operations run through shell.",
   "backend": {
     "entry": "backend/entry.js",
     "integrity": {
-      "backend/entry.js": "sha256-dfc82a819f8de3262b666693aad3fb536d1d0808397a7cc615210cb6b4345ab6"
+      "backend/entry.js": "sha256-1389bc9a2f25feb208b210b9a16c888876a04e3fa43f1c115ad9cf670cc9ccf1"
     },
     "lifecycle": {
       "install": "install"
@@ -17,41 +17,13 @@
   "frontend": {
     "entry": "frontend/entry.js",
     "integrity": {
-      "frontend/entry.js": "sha256-659e8fc83cdddfb2f0b5b46cf3d87f9fad5f40392b5b9d0b75ae2a08ad07f559"
+      "frontend/entry.js": "sha256-76ff04637903307797a950133cea2c994ff2457cdc57c7dd429d5aaf7808859c"
     }
   },
   "configuration": {
     "entry": "config/extension.json",
     "integrity": {
-      "config/extension.json": "sha256-8727a26a1f06924b0f00ac95dac843c55f7edcd18f1b626cd3d0d91f7cdc1bea"
+      "config/extension.json": "sha256-22452e073c4dde763106ce5bdbfc632ba9b5d641ca12ab8414d780486161dd17"
     }
-  },
-  "resources": {
-    "plugins": [
-      {
-        "files": [
-          "plugins/google-cloud-platform/cli.ts"
-        ],
-        "path": "plugins/google-cloud-platform.ts",
-        "integrity": "sha256-99732afc0818d2bfa149be78fba31fa31b69368ee507675500b687194c78d842"
-      }
-    ]
-  },
-  "pluginContributions": [
-    {
-      "pluginName": "google-cloud-platform",
-      "contributions": [
-        {
-          "kind": "tool",
-          "name": "gcloud_cli"
-        }
-      ]
-    }
-  ],
-  "workflowNodes": [
-    {
-      "type": "resource.plugin",
-      "name": "google-cloud-platform"
-    }
-  ]
+  }
 }

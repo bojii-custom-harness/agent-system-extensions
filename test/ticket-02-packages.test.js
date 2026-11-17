@@ -6,6 +6,13 @@ import test from "node:test";
 import { readAicxtManifest } from "../packages/cli/src/zip.js";
 
 const EXTENSION_IDS = ["azure-devops-platform", "google-cloud-platform", "gitlab", "open-design", "xmind"];
+const RELEASE_VERSIONS = {
+  "azure-devops-platform": "2.0.0",
+  "google-cloud-platform": "2.0.1",
+  gitlab: "2.0.0",
+  "open-design": "2.0.0",
+  xmind: "2.0.0",
+};
 const packageRoot = resolve("packages");
 
 async function packagePath(extensionId, ...parts) {
@@ -22,26 +29,34 @@ test("Ticket 02 publishes only the five formal Extension packages with source pr
     const source = JSON.parse(await readFile(await packagePath(extensionId, "source.json"), "utf8"));
     assert.equal(source.extensionId, extensionId);
     assert.equal(source.repository, "agent-system");
-    assert.equal(source.snapshotCommit, "b3040627401c9fe6a6955051022f0e602d602398");
     assert.match(source.sourceTree, /^[a-f0-9]{40}$/);
     assert.ok(source.sourcePath);
     assert.ok(source.sourceRevision);
     assert.notEqual(source.sourceRevision, "6328628617abeb17d12886487387c7cd35023965");
     assert.notEqual(source.sourceRevision, "historical-2.0.0");
+    if (extensionId === "google-cloud-platform") {
+      assert.equal(source.snapshotCommit, "ccf5672c8ef5c43abbc89896a98b0760bddf74ef");
+      assert.equal(source.sourceContentCommit, "bc11548ad8a8d4b1d1ed68923570e8484390518f");
+      assert.equal(source.sourcePackageVersion, "2.3.9");
+      assert.equal(source.releaseVersion, "2.0.1");
+    } else {
+      assert.equal(source.snapshotCommit, "b3040627401c9fe6a6955051022f0e602d602398");
+    }
   }
 });
 
-test("each deterministic build matches its tracked 2.0.0 archive and manifest", async () => {
+test("each deterministic build matches its tracked release archive and manifest", async () => {
   const { buildExtensionPackage } = await import("../scripts/build-extension-packages.js");
   for (const extensionId of EXTENSION_IDS) {
+    const version = RELEASE_VERSIONS[extensionId];
     const { archive, manifest } = await buildExtensionPackage(extensionId);
-    const tracked = await readFile(await packagePath(extensionId, `${extensionId}-2.0.0.aicxt`));
+    const tracked = await readFile(await packagePath(extensionId, `${extensionId}-${version}.aicxt`));
     assert.deepEqual(archive, tracked, `${extensionId} archive must be reproducible`);
     assert.equal(manifest.extensionId, extensionId);
-    assert.equal(manifest.version, "2.0.0");
+    assert.equal(manifest.version, version);
     const unpacked = readAicxtManifest(archive);
     assert.equal(unpacked.extensionId, extensionId);
-    assert.equal(unpacked.version, "2.0.0");
+    assert.equal(unpacked.version, version);
   }
 });
 

@@ -1,12 +1,12 @@
 {
   "extensionId": "google-cloud-platform",
   "repository": "agent-system",
-  "snapshotCommit": "b3040627401c9fe6a6955051022f0e602d602398",
-  "sourceRevision": "b3040627401c9fe6a6955051022f0e602d602398",
-  "sourceContentCommit": "cb106e6b9173af43176d0eb03cfcb1eea77e9820",
+  "snapshotCommit": "ccf5672c8ef5c43abbc89896a98b0760bddf74ef",
+  "sourceRevision": "ccf5672c8ef5c43abbc89896a98b0760bddf74ef",
+  "sourceContentCommit": "bc11548ad8a8d4b1d1ed68923570e8484390518f",
   "sourcePath": "backend/extension-packages/google-cloud-platform",
-  "sourceTree": "c1b509c5f6b0b1e289c78df532c8da18fd3cf840",
-  "sourcePackageVersion": "2.3.8",
-  "releaseVersion": "2.0.0",
-  "notes": "封裝來源為固定 integration tree；sourceContentCommit 是此 package path 最後異動的原始 commit。"
+  "sourceTree": "5d615e29fced7a0aa776df07d30d155c88c6279f",
+  "sourcePackageVersion": "2.3.9",
+  "releaseVersion": "2.0.1",
+  "notes": "GCP runtime 更新取自 agent-system 的固定 dev 快照；sourcePackageVersion 記錄原始套件版本，releaseVersion 使用本 repo 的獨立版本序列。"
 }

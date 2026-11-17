@@ -1,189 +1,215 @@
-import { request as httpRequest } from "node:http";
 import { randomBytes } from "node:crypto";
+import path from "node:path";
+import { request as httpRequest } from "node:http";
 
-const IMAGE = process.env.GCP_CLI_IMAGE || "gcr.io/google.com/cloudsdktool/google-cloud-cli:558.0.0-stable";
-const DOCKER_SOCKET_PATH = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
 const PROJECT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
-const RUNTIME_ROOT = "/root/.config/gcloud";
-const CALLBACK_PORT_PATH = `${RUNTIME_ROOT}/agent-system-login-callback-port`;
-const GOOGLE_CLOUD_CLI_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/google-cloud-sdk/bin";
-const GOOGLE_CLOUD_CLI_PYTHON = "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3";
+const RUNTIME_CONTAINER_DEFAULT = "agent-system-opencode-server";
+const GCLOUD_VOLUME_DESTINATION = "/var/lib/agent-system/gcloud";
+const GCLOUD_CONFIG_ROOT = `${GCLOUD_VOLUME_DESTINATION}/projects`;
+const LEGACY_CONFIG_DESTINATION = "/root/.config/gcloud";
+const LOGIN_TEMP_ROOT = "/tmp/agent-system-gcp-login";
+const GOOGLE_CLOUD_CLI_VERSION = "558.0.0";
+const DOCKER_SOCKET_PATH = process.env.DOCKER_SOCKET_PATH || "/var/run/docker.sock";
+const RUNTIME_CONTAINER_NAME = process.env.OPENCODE_CONTAINER_NAME || RUNTIME_CONTAINER_DEFAULT;
 const BROWSER_REMOTE_CONTROL_URL = trimTrailingSlash(process.env.BROWSER_REMOTE_BASE_URL || "http://browser-remote:3001");
 
 export async function activate(host = {}) {
+  return createGoogleCloudPlatformBackend(host);
+}
+
+/** The factory is exported so tests can drive the package against synthetic Docker/runtime fixtures. */
+export function createGoogleCloudPlatformBackend(host = {}, dependencies = {}) {
   const project = requireProject(host.project);
-  const slug = slugify(project);
-  const container = `agent-system-google-cloud-platform-${slug}`;
-  const volume = `${container}-data`;
+  const runtimeContainerName = dependencies.runtimeContainerName ?? RUNTIME_CONTAINER_NAME;
+  const requestDocker = dependencies.dockerRequest ?? dockerRequest;
+  const requestBrowserRemote = dependencies.browserRemoteRequest ?? browserRemoteRequest;
+  const now = dependencies.now ?? Date.now;
+  let pendingLogin;
+  let loginInFlight;
+  const logoutInFlight = new Map();
+  const logoutRequested = new Set();
+
   return {
-    async handle({ request }) {
-      if (request.method === "POST" && request.path === "install") {
-        const ready = await ensureRuntime(container, volume, project);
-        return { headers: noStoreHeaders(), body: { container, image: IMAGE, project, state: ready ? "ready" : "unavailable" } };
+    async handle({ host: requestHost = {}, request }) {
+      const activeProject = requireProject(requestHost.project ?? project);
+      const method = String(request.method).toUpperCase();
+      if (method === "POST" && request.path === "install") {
+        const runtime = await preflightMainRuntime(activeProject, requestDocker, runtimeContainerName, { createProjectConfig: true });
+        return { headers: noStoreHeaders(), body: { project: activeProject, runtime: "main", state: "ready", version: runtime.version } };
       }
-      if (request.method === "GET" && request.path === "status") {
-        const ready = await ensureRuntime(container, volume, project);
-        const authOutput = ready ? await runExec(container, ["gcloud", "auth", "list", "--format=json"]) : "[]";
-        let accounts = [];
-        try { accounts = JSON.parse(authOutput); } catch { accounts = []; }
-        const authenticated = Array.isArray(accounts) && accounts.length > 0;
-        const loginProcessActive = ready && await isLoginProcessActive(container);
-        const loginLog = ready && !authenticated && !loginProcessActive ? await readLoginLog(container) : "";
-        const failed = !authenticated && !loginProcessActive && /error|failed|denied|cancel/i.test(loginLog);
-        return { headers: noStoreHeaders(), body: { authenticated, container, image: IMAGE, project, state: ready ? "ready" : "unavailable", login: authenticated ? "succeeded" : failed ? "failed" : loginProcessActive ? "pending" : "idle", ...(failed ? { error: "GCP_LOGIN_PROCESS_FAILED", stage: "authorization" } : {}) } };
+      if (method === "GET" && request.path === "status") {
+        const runtime = await preflightMainRuntime(activeProject, requestDocker, runtimeContainerName, { createProjectConfig: true });
+        return { headers: noStoreHeaders(), body: await readLoginStatus(activeProject, runtime, pendingLogin, {
+          requestDocker,
+          requestBrowserRemote,
+          runtimeContainerName,
+          now,
+          onPendingLoginCleared: () => { pendingLogin = undefined; },
+        }) };
       }
-      if (request.method === "POST" && request.path === "exec") {
-        assertProjectRequest(request, project);
-        const args = readGcloudArguments(request.body);
-        await ensureRuntime(container, volume, project);
-        const result = await runGcloudCommand(container, args);
-        return {
-          headers: noStoreHeaders(),
-          body: {
-            exitCode: result.exitCode,
-            output: result.output,
-            truncated: result.truncated,
+      if (method === "POST" && request.path === "login") {
+        if (logoutRequested.has(activeProject)) throw extensionError(409, "GCP_LOGOUT_IN_PROGRESS", "Google Cloud logout is already in progress for this Project.");
+        if (loginInFlight) return loginInFlight;
+        loginInFlight = startProjectLogin(activeProject, requestDocker, requestBrowserRemote, runtimeContainerName, now, {
+          getPendingLogin: () => pendingLogin,
+          setPendingLogin: (value) => { pendingLogin = value; },
+        });
+        try { return await loginInFlight; }
+        finally { loginInFlight = undefined; }
+      }
+      if (method === "POST" && request.path === "cancel") {
+        const runtime = await preflightMainRuntime(activeProject, requestDocker, runtimeContainerName, { createProjectConfig: true });
+        const result = await cancelProjectLogin({
+          project: activeProject,
+          isAuthenticated: async () => (await readAuthStatus(activeProject, runtime, requestDocker, runtimeContainerName)).authenticated,
+          isLoginProcessActive: () => isLoginProcessActive(activeProject, runtime, requestDocker, runtimeContainerName),
+          cancelPendingLogin: () => cancelPendingLogin(activeProject, runtime, requestDocker, runtimeContainerName),
+          browserRemoteRequest: requestBrowserRemote,
+        });
+        if (result.cancelled || result.authenticated) {
+          if (pendingLogin?.project === activeProject) pendingLogin = undefined;
+          await clearLoginArtifacts(activeProject, runtime, requestDocker, runtimeContainerName);
+        }
+        return { headers: noStoreHeaders(), body: result };
+      }
+      if (method === "POST" && request.path === "logout") {
+        if (logoutInFlight.has(activeProject)) return logoutInFlight.get(activeProject);
+        logoutRequested.add(activeProject);
+        const logoutPromise = logoutProject(activeProject, runtimeContainerName, requestDocker, requestBrowserRemote, {
+          getLoginInFlight: () => loginInFlight,
+          clearPendingLogin: () => {
+            if (pendingLogin?.project === activeProject) pendingLogin = undefined;
           },
-        };
-      }
-      if (request.method === "POST" && request.path === "login") {
-        await ensureRuntime(container, volume, project);
-        let startedLogin = false;
-        try {
-          let authorizationUrl = await readLoginUrl(container);
-          if (!authorizationUrl || !(await isLoginProcessActive(container))) {
-            await runExec(container, ["rm", "-f", `${RUNTIME_ROOT}/agent-system-login.log`, `${RUNTIME_ROOT}/agent-system-login.pid`, CALLBACK_PORT_PATH]);
-            await runExec(container, ["bash", "-c", `DISPLAY=:0 BROWSER=/usr/bin/true gcloud auth login --brief > ${RUNTIME_ROOT}/agent-system-login.log 2>&1 & login_pid=$!; echo $login_pid > ${RUNTIME_ROOT}/agent-system-login.pid; wait $login_pid`], true);
-            startedLogin = true;
-            authorizationUrl = await waitForLoginUrl(container);
-          }
-          const callbackPort = await configureRuntimeCallbackPort(container, authorizationUrl);
-          const { browserUrl, expiresAt } = await openBrowserRemoteLogin(container, authorizationUrl, callbackPort);
-          return { headers: noStoreHeaders(), body: { browserUrl, container, expiresAt, state: "pending" } };
-        } catch (error) {
-          if (startedLogin) await cancelPendingLogin(container);
-          throw error;
+        });
+        logoutInFlight.set(activeProject, logoutPromise);
+        try { return await logoutPromise; }
+        finally {
+          logoutInFlight.delete(activeProject);
+          logoutRequested.delete(activeProject);
         }
       }
-      if (request.method === "POST" && request.path === "logout") {
-        await ensureRuntime(container, volume, project);
-        await runExec(container, ["gcloud", "auth", "revoke", "--all", "--quiet"]);
-        return { headers: noStoreHeaders(), body: { authenticated: false, container, project } };
+      if (method === "GET" && request.path === "legacy-cleanup") {
+        return { headers: noStoreHeaders(), body: await readLegacyCleanupAvailability(
+          requestHost.installOperationStage,
+          activeProject,
+          requestDocker,
+          runtimeContainerName,
+        ) };
       }
-      if (request.method === "POST" && request.path === "cancel") {
-        await ensureRuntime(container, volume, project);
-        const body = await cancelProjectLogin({ container, project, runExec, isLoginProcessActive, cancelPendingLogin, browserRemoteRequest });
-        return { headers: noStoreHeaders(), body };
+      if (method === "POST" && request.path === "legacy-cleanup") {
+        if (requestHost.installOperationStage !== "completed") {
+          throw extensionError(409, "GCP_LEGACY_CLEANUP_NOT_READY", "Install the current Extension and pass the main runtime preflight before cleaning legacy resources.");
+        }
+        await preflightMainRuntime(activeProject, requestDocker, runtimeContainerName, { createProjectConfig: false });
+        const resources = await inspectLegacyResources(activeProject, requestDocker);
+        if (!resources) return { headers: noStoreHeaders(), body: { cleaned: false, project: activeProject, reason: "NO_LEGACY_RESOURCES" } };
+        const result = await removeLegacyResources(resources, requestDocker);
+        return { headers: noStoreHeaders(), body: { ...result, project: activeProject } };
       }
       throw extensionError(404, "GCP_PATH_NOT_FOUND", "Google Cloud Platform request path is unavailable.");
     },
   };
 }
 
-export async function cancelProjectLogin({ container, project, runExec, isLoginProcessActive, cancelPendingLogin, browserRemoteRequest }) {
-  const authOutput = await runExec(container, ["gcloud", "auth", "list", "--format=json"]);
-  let accounts = [];
-  try { accounts = JSON.parse(authOutput); } catch { accounts = []; }
-  if (Array.isArray(accounts) && accounts.length > 0) return { cancelled: false, authenticated: true, project };
-  if (!(await isLoginProcessActive(container))) return { cancelled: false, authenticated: false, project };
-  try { await browserRemoteRequest("POST", "/gcloud/callbacks/cancel", { target: container }); } catch { /* 專案程序仍須在 browser-remote 無法連線時停止。 */ }
-  await cancelPendingLogin(container);
-  return { cancelled: true, authenticated: false, project };
+async function logoutProject(project, runtimeContainerName, requestDocker, requestBrowserRemote, pendingLoginAccess) {
+  const runtime = await preflightMainRuntime(project, requestDocker, runtimeContainerName, { createProjectConfig: true });
+  const loginInFlight = pendingLoginAccess.getLoginInFlight();
+  if (loginInFlight) {
+    try { await loginInFlight; } catch { /* The login handler records its own failure and process cleanup. */ }
+  }
+
+  let stopError;
+  try { await cancelPendingLogin(project, runtime, requestDocker, runtimeContainerName); }
+  catch (error) { stopError = error; }
+
+  let callbackCleanupError;
+  try { await requestBrowserRemote("POST", "/gcloud/callbacks/cancel", { project }); }
+  catch (error) { callbackCleanupError = error; }
+
+  if (stopError) throw stopError;
+
+  const artifactsCleared = await clearLoginArtifacts(project, runtime, requestDocker, runtimeContainerName);
+  const revoke = await executeRuntimeCommand(runtime, project, ["gcloud", "auth", "revoke", "--all", "--quiet"], requestDocker, runtimeContainerName, { timeoutMs: 30_000, allowFailure: true });
+  if (revoke.exitCode !== 0 || !artifactsCleared || callbackCleanupError) {
+    throw extensionError(503, "GCP_LOGOUT_FAILED", "Google Cloud login state for this Project could not be fully cleared.");
+  }
+  pendingLoginAccess.clearPendingLogin();
+  return { headers: noStoreHeaders(), body: { authenticated: false, project } };
 }
 
-async function ensureRuntime(name, volume, project) {
-  const image = await dockerRequest("GET", `/images/${encodeURIComponent(IMAGE)}/json`);
-  if (image.status === 404) {
-    const pull = await dockerRequest("POST", `/images/create?fromImage=${encodeURIComponent(IMAGE)}`, undefined, 1_200_000);
-    if (pull.status < 200 || pull.status >= 300) throw extensionError(503, "GCP_IMAGE_PULL_FAILED", "The Google Cloud CLI image could not be pulled.");
-  } else if (image.status < 200 || image.status >= 300) {
-    throw extensionError(503, "GCP_IMAGE_INSPECT_FAILED", "The Google Cloud CLI image could not be inspected.");
+async function startProjectLogin(project, requestDocker, requestBrowserRemote, runtimeContainerName, now, pendingLoginAccess) {
+  const runtime = await preflightMainRuntime(project, requestDocker, runtimeContainerName, { createProjectConfig: true });
+  const status = await readAuthStatus(project, runtime, requestDocker, runtimeContainerName);
+  if (status.authenticated) return { headers: noStoreHeaders(), body: { authenticated: true, project, state: "succeeded" } };
+  const currentPending = pendingLoginAccess.getPendingLogin();
+  if (await isLoginProcessActive(project, runtime, requestDocker, runtimeContainerName)) {
+    if (currentPending?.project === project && currentPending.expiresAt > now()) {
+      return { headers: noStoreHeaders(), body: { browserUrl: currentPending.browserUrl, expiresAt: currentPending.expiresAt, state: "pending" } };
+    }
+    throw extensionError(409, "GCP_LOGIN_BUSY", "A Google Cloud login is already active for this Project.");
   }
-  const existing = await dockerRequest("GET", `/containers/${encodeURIComponent(name)}/json`);
-  let container = existing.body;
-  if (existing.status === 404) {
-    const created = await dockerRequest("POST", `/containers/create?name=${encodeURIComponent(name)}`, {
-      Image: IMAGE,
-      Env: [`CLOUDSDK_CONFIG=${RUNTIME_ROOT}`, `CLOUDSDK_PYTHON=${GOOGLE_CLOUD_CLI_PYTHON}`, `PATH=${GOOGLE_CLOUD_CLI_PATH}`, `AGENT_SYSTEM_PROJECT=${project}`, "GCP_CLI_CALLBACK_PROXY_VERSION=2"],
-      Labels: { "agent-system.extension": "google-cloud-platform", "agent-system.project": project },
-      Cmd: ["bash", "-lc", `${GOOGLE_CLOUD_CLI_PYTHON} -c 'import socket,threading; s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("0.0.0.0",8086)); s.listen();\ndef relay(c):\n try:\n  p=int(open("${CALLBACK_PORT_PATH}").read().strip()); u=socket.create_connection(("127.0.0.1",p)); threading.Thread(target=pipe,args=(c,u),daemon=True).start(); pipe(u,c)\n except Exception: c.close()\ndef pipe(a,b):\n try:\n  while True:\n   d=a.recv(65536)\n   if not d: break\n   b.sendall(d)\n except Exception: pass\n finally:\n  a.close(); b.close()\nwhile True:\n c,_=s.accept(); threading.Thread(target=relay,args=(c,),daemon=True).start()' & while :; do sleep 3600; done`],
-      ExposedPorts: { "8086/tcp": {} },
-      HostConfig: {
-        Binds: [`${volume}:${RUNTIME_ROOT}`],
-        RestartPolicy: { Name: "unless-stopped" },
-      },
-      NetworkingConfig: { EndpointsConfig: Object.fromEntries(runtimeNetworks().map((network) => [network, { Aliases: [name] }])) },
+
+  await clearLoginArtifacts(project, runtime, requestDocker, runtimeContainerName);
+  try {
+    await startLoginProcess(project, runtime, requestDocker, runtimeContainerName);
+    const authorizationUrl = await waitForAuthorizationUrl(project, runtime, requestDocker, runtimeContainerName, now);
+    const callback = parseAuthorizationCallback(authorizationUrl);
+    const opened = await openBrowserRemoteLogin(project, authorizationUrl, callback.port, {
+      browserRemoteRequest: requestBrowserRemote,
+      now,
     });
-    if (created.status < 200 || created.status >= 300) throw extensionError(503, "GCP_CONTAINER_CREATE_FAILED", "The project Google Cloud CLI container could not be created. Port 8085 may already be in use.");
-    const inspected = await dockerRequest("GET", `/containers/${encodeURIComponent(name)}/json`);
-    container = inspected.body;
-  } else if (existing.status < 200 || existing.status >= 300 || !isRecord(container)) {
-    throw extensionError(503, "GCP_CONTAINER_INSPECT_FAILED", "The project Google Cloud CLI container could not be inspected.");
+    pendingLoginAccess.setPendingLogin({ project, state: callback.state, expiresAt: opened.expiresAt, browserUrl: opened.browserUrl });
+    return { headers: noStoreHeaders(), body: { browserUrl: opened.browserUrl, expiresAt: opened.expiresAt, state: "pending" } };
+  } catch (error) {
+    await cancelPendingLogin(project, runtime, requestDocker, runtimeContainerName);
+    await clearLoginArtifacts(project, runtime, requestDocker, runtimeContainerName);
+    throw error;
   }
-  const labels = container.Config?.Labels || {};
-  if (labels["agent-system.extension"] !== "google-cloud-platform" || labels["agent-system.project"] !== project) {
-    throw extensionError(409, "GCP_CONTAINER_CONFLICT", "The Google Cloud CLI container name belongs to another resource.");
-  }
-  const environment = new Set(Array.isArray(container.Config?.Env) ? container.Config.Env : []);
-  const expectedEnvironment = [`CLOUDSDK_CONFIG=${RUNTIME_ROOT}`, `CLOUDSDK_PYTHON=${GOOGLE_CLOUD_CLI_PYTHON}`, `PATH=${GOOGLE_CLOUD_CLI_PATH}`, `AGENT_SYSTEM_PROJECT=${project}`, "GCP_CLI_CALLBACK_PROXY_VERSION=2"];
-  if (container.Config?.Image !== IMAGE || expectedEnvironment.some((value) => !environment.has(value))) {
-    if (container.State?.Running === true) await dockerRequest("POST", `/containers/${encodeURIComponent(name)}/stop?t=10`);
-    const removed = await dockerRequest("DELETE", `/containers/${encodeURIComponent(name)}?force=true&v=false`);
-    if (removed.status !== 204 && removed.status !== 404 && (removed.status < 200 || removed.status >= 300)) throw extensionError(503, "GCP_CONTAINER_REPLACE_FAILED", "The previous Google Cloud CLI container could not be replaced.");
-    return ensureRuntime(name, volume, project);
-  }
-  const publishedPorts = container.HostConfig?.PortBindings || {};
-  if (Object.values(publishedPorts).some((bindings) => Array.isArray(bindings) && bindings.length > 0)) {
-    if (container.State?.Running === true) await dockerRequest("POST", `/containers/${encodeURIComponent(name)}/stop?t=10`);
-    const removed = await dockerRequest("DELETE", `/containers/${encodeURIComponent(name)}?force=true&v=false`);
-    if (removed.status !== 204 && removed.status !== 404 && (removed.status < 200 || removed.status >= 300)) throw extensionError(503, "GCP_CONTAINER_REPLACE_FAILED", "The previous Google Cloud CLI container could not be replaced.");
-    return ensureRuntime(name, volume, project);
-  }
-  if (container.State?.Running !== true) {
-    const started = await dockerRequest("POST", `/containers/${encodeURIComponent(name)}/start`);
-    if (![204, 304].includes(started.status) && (started.status < 200 || started.status >= 300)) throw extensionError(503, "GCP_CONTAINER_START_FAILED", "The project Google Cloud CLI container could not be started.");
-  }
-  await connectRuntimeNetworks(name, container);
-  return true;
 }
 
-async function configureRuntimeCallbackPort(container, authorizationUrl) {
-  const url = new URL(authorizationUrl);
-  const redirect = new URL(url.searchParams.get("redirect_uri") || "");
-  const port = Number(redirect.port);
-  if (url.hostname !== "accounts.google.com" || redirect.protocol !== "http:" || redirect.hostname !== "localhost" || redirect.pathname !== "/" || !Number.isInteger(port) || port < 1024 || port > 65_535) {
+export async function cancelProjectLogin({ project, isAuthenticated, isLoginProcessActive, cancelPendingLogin: stopLogin, browserRemoteRequest: requestBrowserRemote }) {
+  const authenticated = await isAuthenticated();
+  if (authenticated) return { cancelled: false, authenticated: true, project };
+  if (!(await isLoginProcessActive())) {
+    const authenticatedAfterLiveness = await isAuthenticated();
+    if (authenticatedAfterLiveness) {
+      try { await requestBrowserRemote("POST", "/gcloud/callbacks/cancel", { project }); } catch { /* A completed login remains successful if browser cleanup is unavailable. */ }
+    }
+    return { cancelled: false, authenticated: authenticatedAfterLiveness, project };
+  }
+  try { await requestBrowserRemote("POST", "/gcloud/callbacks/cancel", { project }); } catch { /* Login must stop even if browser-remote is unavailable. */ }
+  await stopLogin();
+  const authenticatedAfterStop = await isAuthenticated();
+  return { cancelled: !authenticatedAfterStop, authenticated: authenticatedAfterStop, project };
+}
+
+export async function openBrowserRemoteLogin(project, authorizationUrl, callbackPort, dependencies = {}) {
+  const requestBrowserRemote = dependencies.browserRemoteRequest ?? browserRemoteRequest;
+  const now = dependencies.now ?? Date.now;
+  const callback = parseAuthorizationCallback(authorizationUrl);
+  if (callback.port !== callbackPort) {
     throw extensionError(502, "GCP_LOGIN_CALLBACK_INVALID", "The Google Cloud CLI selected an unsupported OAuth callback address.");
   }
-  await runExec(container, ["bash", "-c", `printf '%s' '${port}' > '${CALLBACK_PORT_PATH}'`]);
-  return port;
-}
-
-export async function openBrowserRemoteLogin(container, authorizationUrl, callbackPort) {
-  const loginUrl = new URL(authorizationUrl);
-  const state = loginUrl.searchParams.get("state") || "";
-  if (loginUrl.hostname !== "accounts.google.com" || !Number.isInteger(callbackPort) || !state) {
-    throw extensionError(502, "GCP_LOGIN_URL_INVALID", "The Google Cloud CLI produced an unsupported browser login URL.");
-  }
-  const expiresAt = Date.now() + 5 * 60 * 1000;
+  const expiresAt = now() + 5 * 60 * 1000;
   const sessionToken = randomBytes(32).toString("base64url");
   let tabId;
   let callbackRegistered = false;
   let sessionRegistered = false;
   try {
-    await browserRemoteRequest("POST", "/gcloud/callbacks", { callbackPort, expiresAt, sessionToken, state, target: container });
+    await requestBrowserRemote("POST", "/gcloud/callbacks", { callbackPort, expiresAt, project, sessionToken, state: callback.state });
     callbackRegistered = true;
-    await browserRemoteRequest("POST", "/sessions", { expiresAt, token: sessionToken });
+    await requestBrowserRemote("POST", "/sessions", { expiresAt, token: sessionToken });
     sessionRegistered = true;
-    const tab = await browserRemoteRequest("POST", `/sessions/${encodeURIComponent(sessionToken)}/api/tabs`, { url: authorizationUrl });
+    const tab = await requestBrowserRemote("POST", `/sessions/${encodeURIComponent(sessionToken)}/api/tabs`, { url: authorizationUrl });
     tabId = typeof tab?.id === "string" ? tab.id : undefined;
     if (!tabId) throw extensionError(503, "GCP_BROWSER_TAB_CREATE_FAILED", "The server browser could not open the Google login page.");
-    await browserRemoteRequest("PATCH", `/gcloud/callbacks/${encodeURIComponent(state)}`, { tabId });
-    await browserRemoteRequest("POST", `/sessions/${encodeURIComponent(sessionToken)}/api/tabs/${encodeURIComponent(tabId)}/activate`);
+    await requestBrowserRemote("PATCH", `/gcloud/callbacks/${encodeURIComponent(callback.state)}`, { tabId });
+    await requestBrowserRemote("POST", `/sessions/${encodeURIComponent(sessionToken)}/api/tabs/${encodeURIComponent(tabId)}/activate`);
     return { browserUrl: buildBrowserRemoteUrl(sessionToken), expiresAt };
   } catch (error) {
-    if (tabId) await ignoreBrowserRemoteRequest("DELETE", `/sessions/${encodeURIComponent(sessionToken)}/api/tabs/${encodeURIComponent(tabId)}`);
-    if (sessionRegistered) await ignoreBrowserRemoteRequest("DELETE", `/sessions/${encodeURIComponent(sessionToken)}`);
-    if (callbackRegistered) await ignoreBrowserRemoteRequest("DELETE", `/gcloud/callbacks/${encodeURIComponent(state)}`);
+    if (tabId) await ignoreBrowserRemoteRequest(requestBrowserRemote, "DELETE", `/sessions/${encodeURIComponent(sessionToken)}/api/tabs/${encodeURIComponent(tabId)}`);
+    if (sessionRegistered) await ignoreBrowserRemoteRequest(requestBrowserRemote, "DELETE", `/sessions/${encodeURIComponent(sessionToken)}`);
+    if (callbackRegistered) await ignoreBrowserRemoteRequest(requestBrowserRemote, "DELETE", `/gcloud/callbacks/${encodeURIComponent(callback.state)}`);
     throw error;
   }
 }
@@ -192,10 +218,346 @@ export function buildBrowserRemoteUrl(token) {
   return `/browser-remote/session/${encodeURIComponent(token)}/`;
 }
 
-async function browserRemoteRequest(method, path, body) {
+export function parseAuthorizationCallback(authorizationUrl) {
+  try {
+    const url = new URL(authorizationUrl);
+    const redirect = new URL(url.searchParams.get("redirect_uri") || "");
+    const port = Number(redirect.port);
+    const state = url.searchParams.get("state") || "";
+    if (url.hostname !== "accounts.google.com" || !url.pathname.startsWith("/")
+      || redirect.protocol !== "http:" || redirect.hostname !== "localhost" || redirect.pathname !== "/"
+      || !Number.isInteger(port) || port < 1024 || port > 65_535
+      || !/^[A-Za-z0-9_-]{8,512}$/.test(state)) {
+      throw new Error("invalid callback");
+    }
+    return { port, state };
+  } catch {
+    throw extensionError(502, "GCP_LOGIN_CALLBACK_INVALID", "The Google Cloud CLI selected an unsupported OAuth callback address.");
+  }
+}
+
+async function preflightMainRuntime(project, requestDocker, containerName, { createProjectConfig }) {
+  const runtime = await inspectMainRuntime(requestDocker, containerName);
+  const configPath = projectConfigPath(runtime.configRoot, project);
+  const version = await executeRuntimeCommand(runtime, project, ["gcloud", "version"], requestDocker, containerName, { timeoutMs: 30_000 });
+  if (version.exitCode !== 0 || !new RegExp(`Google Cloud SDK ${GOOGLE_CLOUD_CLI_VERSION.replaceAll(".", "\\.")}\\b`).test(version.output)) {
+    throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime does not provide the required Google Cloud CLI version.");
+  }
+  if (createProjectConfig) {
+    const result = await executeRuntimeCommand(runtime, project, ["/bin/sh", "-lc", 'test ! -L "$CLOUDSDK_CONFIG" && mkdir -p -- "$CLOUDSDK_CONFIG" && test ! -L "$CLOUDSDK_CONFIG" && test -d "$CLOUDSDK_CONFIG" && test -w "$CLOUDSDK_CONFIG"'], requestDocker, containerName, { timeoutMs: 15_000 });
+    if (result.exitCode !== 0) throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime shared gcloud configuration is not writable.");
+  }
+  return { ...runtime, configPath, version: GOOGLE_CLOUD_CLI_VERSION };
+}
+
+async function inspectMainRuntime(requestDocker, containerName) {
+  if (!/^[A-Za-z0-9_.-]{1,128}$/.test(containerName)) throw extensionError(503, "GCP_RUNTIME_UNAVAILABLE", "The main OpenCode runtime identity is invalid.");
+  let inspected;
+  try { inspected = await requestDocker("GET", `/containers/${encodeURIComponent(containerName)}/json`); }
+  catch { throw extensionError(503, "GCP_RUNTIME_UNAVAILABLE", "The main OpenCode runtime is unavailable."); }
+  if (inspected.status === 404 || inspected.status < 200 || inspected.status >= 300 || !isRecord(inspected.body)) {
+    throw extensionError(503, "GCP_RUNTIME_UNAVAILABLE", "The main OpenCode runtime is unavailable.");
+  }
+  const container = inspected.body;
+  if (container.Name && container.Name !== `/${containerName}` && container.Name !== containerName) {
+    throw extensionError(503, "GCP_RUNTIME_IDENTITY_INVALID", "The configured main runtime identity did not match Docker.");
+  }
+  if (container.State?.Running !== true || container.Config?.Labels?.["com.docker.compose.service"] !== "opencode-server") {
+    throw extensionError(503, "GCP_RUNTIME_UNAVAILABLE", "The main OpenCode runtime is not running.");
+  }
+  const mounts = Array.isArray(container.Mounts) ? container.Mounts : [];
+  const sharedMounts = mounts.filter((mount) => mount?.Destination === GCLOUD_VOLUME_DESTINATION);
+  if (sharedMounts.length !== 1 || sharedMounts[0].Type !== "volume" || typeof sharedMounts[0].Name !== "string" || !sharedMounts[0].Name) {
+    throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime shared gcloud volume is not mounted as expected.");
+  }
+  const configRoot = readContainerEnvironment(container.Config?.Env, "AGENT_SYSTEM_GCLOUD_CONFIG_ROOT");
+  if (configRoot !== GCLOUD_CONFIG_ROOT || !isPathWithin(GCLOUD_VOLUME_DESTINATION, configRoot)) {
+    throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime gcloud configuration root does not match the shared volume.");
+  }
+  return { containerName, configRoot, volumeName: sharedMounts[0].Name };
+}
+
+async function executeRuntimeCommand(runtime, project, command, requestDocker, containerName, { timeoutMs = 30_000, allowFailure = false } = {}) {
+  const configPath = projectConfigPath(runtime.configRoot, project);
+  let created;
+  try {
+    created = await requestDocker("POST", `/containers/${encodeURIComponent(containerName)}/exec`, {
+      AttachStderr: true,
+      AttachStdin: false,
+      AttachStdout: true,
+      Cmd: command,
+      Env: [`CLOUDSDK_CONFIG=${configPath}`],
+      Tty: false,
+    }, timeoutMs);
+  } catch {
+    throw extensionError(503, "GCP_RUNTIME_COMMAND_FAILED", "A Google Cloud operation could not be started in the main runtime.");
+  }
+  const execID = created.body?.Id;
+  if (created.status < 200 || created.status >= 300 || typeof execID !== "string" || !/^[A-Za-z0-9_-]{8,128}$/.test(execID)) {
+    throw extensionError(503, "GCP_RUNTIME_COMMAND_FAILED", "A Google Cloud operation could not be started in the main runtime.");
+  }
+  let started;
+  try { started = await requestDocker("POST", `/exec/${encodeURIComponent(execID)}/start`, { Detach: false, Tty: false }, timeoutMs, 256 * 1024); }
+  catch {
+    throw extensionError(503, "GCP_RUNTIME_COMMAND_FAILED", "A Google Cloud operation did not finish in the main runtime.");
+  }
+  if (started.status < 200 || started.status >= 300) throw extensionError(503, "GCP_RUNTIME_COMMAND_FAILED", "A Google Cloud operation did not finish in the main runtime.");
+  if (started.truncated) throw extensionError(503, "GCP_RUNTIME_OUTPUT_TRUNCATED", "A Google Cloud operation returned incomplete output in the main runtime.");
+  const output = decodeDockerStream(started.text || "");
+  let inspected;
+  try { inspected = await requestDocker("GET", `/exec/${encodeURIComponent(execID)}/json`, undefined, timeoutMs); }
+  catch { throw extensionError(503, "GCP_RUNTIME_COMMAND_FAILED", "A Google Cloud operation did not finish in the main runtime."); }
+  const exitCode = inspected.body?.ExitCode;
+  if (inspected.status < 200 || inspected.status >= 300 || !Number.isInteger(exitCode)) {
+    throw extensionError(503, "GCP_RUNTIME_COMMAND_FAILED", "A Google Cloud operation did not finish in the main runtime.");
+  }
+  if (!allowFailure && exitCode !== 0) throw extensionError(503, "GCP_RUNTIME_COMMAND_FAILED", "A Google Cloud operation failed in the main runtime.");
+  return { exitCode, output };
+}
+
+async function readLoginStatus(project, runtime, pendingLogin, dependencies) {
+  const auth = await readAuthStatus(project, runtime, dependencies.requestDocker, dependencies.runtimeContainerName);
+  if (auth.authenticated) {
+    if (pendingLogin?.project === project) {
+      await ignoreBrowserRemoteRequest(dependencies.requestBrowserRemote, "DELETE", `/gcloud/callbacks/${encodeURIComponent(pendingLogin.state)}`);
+      dependencies.onPendingLoginCleared();
+    }
+    await clearLoginArtifacts(project, runtime, dependencies.requestDocker, dependencies.runtimeContainerName);
+    return { authenticated: true, login: "succeeded", project, state: "ready" };
+  }
+
+  const active = await isLoginProcessActive(project, runtime, dependencies.requestDocker, dependencies.runtimeContainerName);
+  if (active && (!pendingLogin || pendingLogin.expiresAt > dependencies.now())) {
+    return { authenticated: false, login: "pending", project, state: "ready" };
+  }
+  if (pendingLogin?.project === project) {
+    const timedOut = pendingLogin.expiresAt <= dependencies.now();
+    if (active) await cancelPendingLogin(project, runtime, dependencies.requestDocker, dependencies.runtimeContainerName);
+    await ignoreBrowserRemoteRequest(dependencies.requestBrowserRemote, "DELETE", `/gcloud/callbacks/${encodeURIComponent(pendingLogin.state)}`);
+    dependencies.onPendingLoginCleared();
+    await clearLoginArtifacts(project, runtime, dependencies.requestDocker, dependencies.runtimeContainerName);
+    return { authenticated: false, error: timedOut ? "GCP_LOGIN_TIMEOUT" : "GCP_LOGIN_PROCESS_FAILED", login: "failed", project, state: "ready" };
+  }
+  return { authenticated: false, login: "idle", project, state: "ready" };
+}
+
+async function readAuthStatus(project, runtime, requestDocker, containerName) {
+  const result = await executeRuntimeCommand(runtime, project, ["gcloud", "auth", "list", "--format=json"], requestDocker, containerName, { timeoutMs: 30_000 });
+  let accounts;
+  try { accounts = JSON.parse(result.output); } catch { accounts = undefined; }
+  return { authenticated: Array.isArray(accounts) && accounts.length > 0 };
+}
+
+async function startLoginProcess(project, runtime, requestDocker, containerName) {
+  const paths = loginPaths(project);
+  const script = `umask 077; mkdir -p '${LOGIN_TEMP_ROOT}'; rm -f '${paths.log}' '${paths.pid}' '${paths.exit}'; ( DISPLAY=:0 BROWSER=/usr/bin/true gcloud auth login --brief > '${paths.log}' 2>&1; printf '%s' "$?" > '${paths.exit}' ) </dev/null >/dev/null 2>&1 & printf '%s' "$!" > '${paths.pid}'`;
+  const result = await executeRuntimeCommand(runtime, project, ["/bin/sh", "-c", script], requestDocker, containerName, { timeoutMs: 15_000 });
+  if (result.exitCode !== 0) throw extensionError(503, "GCP_LOGIN_PROCESS_START_FAILED", "The Google Cloud login process could not be started in the main runtime.");
+}
+
+async function waitForAuthorizationUrl(project, runtime, requestDocker, containerName, now) {
+  const deadline = now() + 30_000;
+  while (now() < deadline) {
+    const output = await executeRuntimeCommand(runtime, project, ["/bin/sh", "-c", `cat '${loginPaths(project).log}' 2>/dev/null || true`], requestDocker, containerName, { timeoutMs: 10_000 });
+    const authorizationUrl = extractAuthorizationUrl(output.output);
+    if (authorizationUrl) return authorizationUrl;
+    if (!(await isLoginProcessActive(project, runtime, requestDocker, containerName))) {
+      throw extensionError(502, "GCP_LOGIN_PROCESS_FAILED", "The Google Cloud login process ended before producing an authorization URL.");
+    }
+    await delay(Math.min(250, Math.max(1, deadline - now())));
+  }
+  await cancelPendingLogin(project, runtime, requestDocker, containerName);
+  throw extensionError(504, "GCP_LOGIN_URL_TIMEOUT", "The Google Cloud login process did not produce an authorization URL in time.");
+}
+
+async function isLoginProcessActive(project, runtime, requestDocker, containerName, timeoutMs = 10_000) {
+  const pidPath = loginPaths(project).pid;
+  const script = String.raw`has_login_process() { if [ -r "/proc/$1/cmdline" ] && tr '\000' ' ' < "/proc/$1/cmdline" | grep -Eq 'gcloud(\.py)?[[:space:]]+auth[[:space:]]+login'; then return 0; fi; for child in $(cat "/proc/$1/task/$1/children" 2>/dev/null || true); do if has_login_process "$child"; then return 0; fi; done; return 1; }; pid=$(cat '${pidPath}' 2>/dev/null || true); case "$pid" in ''|*[!0-9]*) exit 1;; esac; if has_login_process "$pid"; then printf active; exit 0; fi; exit 1`;
+  const result = await executeRuntimeCommand(runtime, project, ["/bin/sh", "-c", script], requestDocker, containerName, { timeoutMs, allowFailure: true });
+  return result.exitCode === 0 && result.output.trim() === "active";
+}
+
+async function cancelPendingLogin(project, runtime, requestDocker, containerName) {
+  if (!(await isLoginProcessActive(project, runtime, requestDocker, containerName))) return;
+  await signalLoginProcess(project, runtime, requestDocker, containerName, "TERM");
+  if (await waitForLoginProcessStop(project, runtime, requestDocker, containerName, 5_000)) return;
+  await signalLoginProcess(project, runtime, requestDocker, containerName, "KILL");
+  if (await waitForLoginProcessStop(project, runtime, requestDocker, containerName, 2_000)) return;
+  throw extensionError(503, "GCP_LOGIN_PROCESS_STOP_FAILED", "The pending Google Cloud login process could not be stopped safely.");
+}
+
+async function signalLoginProcess(project, runtime, requestDocker, containerName, signal) {
+  const paths = loginPaths(project);
+  const script = String.raw`signal_login_tree() { for child in $(cat "/proc/$1/task/$1/children" 2>/dev/null || true); do signal_login_tree "$child"; done; if [ -z "$(cat "/proc/$1/task/$1/children" 2>/dev/null || true)" ] && [ -r "/proc/$1/cmdline" ] && tr '\000' ' ' < "/proc/$1/cmdline" | grep -Eq 'gcloud(\.py)?[[:space:]]+auth[[:space:]]+login'; then kill -${signal} "$1" 2>/dev/null || true; fi; }; pid=$(cat '${paths.pid}' 2>/dev/null || true); case "$pid" in ''|*[!0-9]*) ;; *) signal_login_tree "$pid";; esac`;
+  await executeRuntimeCommand(runtime, project, ["/bin/sh", "-c", script], requestDocker, containerName, { timeoutMs: 10_000, allowFailure: true });
+}
+
+async function waitForLoginProcessStop(project, runtime, requestDocker, containerName, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    if (!(await isLoginProcessActive(project, runtime, requestDocker, containerName, 2_000))) return true;
+    if (Date.now() >= deadline) return false;
+    await delay(Math.min(100, deadline - Date.now()));
+  } while (Date.now() < deadline);
+  return false;
+}
+
+async function clearLoginArtifacts(project, runtime, requestDocker, containerName) {
+  const paths = loginPaths(project);
+  const result = await executeRuntimeCommand(runtime, project, ["/bin/sh", "-c", `rm -f '${paths.log}' '${paths.pid}' '${paths.exit}'`], requestDocker, containerName, { timeoutMs: 10_000, allowFailure: true });
+  return result.exitCode === 0;
+}
+
+function extractAuthorizationUrl(output) {
+  const match = String(output).match(/https:\/\/accounts\.google\.com\/[^\s"']+/);
+  if (!match) return undefined;
+  try {
+    parseAuthorizationCallback(match[0]);
+    return match[0];
+  } catch {
+    return undefined;
+  }
+}
+
+function loginPaths(project) {
+  if (!PROJECT_PATTERN.test(project)) throw extensionError(403, "GCP_PROJECT_CONTEXT_INVALID", "Google Cloud Platform requires an active Project context.");
+  return {
+    exit: `${LOGIN_TEMP_ROOT}/${project}.exit`,
+    log: `${LOGIN_TEMP_ROOT}/${project}.log`,
+    pid: `${LOGIN_TEMP_ROOT}/${project}.pid`,
+  };
+}
+
+async function readLegacyCleanupAvailability(installStage, project, requestDocker, containerName) {
+  if (installStage !== "completed") return { available: false, project, reason: "INSTALL_NOT_COMPLETE" };
+  try {
+    await preflightMainRuntime(project, requestDocker, containerName, { createProjectConfig: false });
+    const resources = await inspectLegacyResources(project, requestDocker);
+    return resources
+      ? { available: true, project, reason: "READY" }
+      : { available: false, project, reason: "NO_LEGACY_RESOURCES" };
+  } catch (error) {
+    return { available: false, project, reason: safeErrorCode(error) };
+  }
+}
+
+async function inspectLegacyResources(project, requestDocker) {
+  const containerName = legacyContainerName(project);
+  const volumeName = `${containerName}-data`;
+  let inspected;
+  try { inspected = await requestDocker("GET", `/containers/${encodeURIComponent(containerName)}/json`); }
+  catch { throw extensionError(503, "GCP_LEGACY_INSPECT_FAILED", "The legacy Project runtime could not be inspected safely."); }
+  if (inspected.status === 404) {
+    const orphanVolume = await requestDocker("GET", `/volumes/${encodeURIComponent(volumeName)}`);
+    if (orphanVolume.status !== 404) throw extensionError(409, "GCP_LEGACY_OWNERSHIP_UNVERIFIED", "The legacy data volume has no verifiable owning runtime and was preserved.");
+    return undefined;
+  }
+  if (inspected.status < 200 || inspected.status >= 300 || !isRecord(inspected.body)) {
+    throw extensionError(503, "GCP_LEGACY_INSPECT_FAILED", "The legacy Project runtime could not be inspected safely.");
+  }
+  const container = inspected.body;
+  const labels = container.Config?.Labels ?? {};
+  const expectedName = `/${containerName}`;
+  const environment = Array.isArray(container.Config?.Env) ? container.Config.Env : [];
+  const mounts = Array.isArray(container.Mounts) ? container.Mounts : [];
+  const matchingMounts = mounts.filter((mount) => mount?.Destination === LEGACY_CONFIG_DESTINATION);
+  const expectedBind = `${volumeName}:${LEGACY_CONFIG_DESTINATION}`;
+  const binds = container.HostConfig?.Binds;
+  const validBinds = binds === undefined || (Array.isArray(binds) && binds.length === 1 && binds[0] === expectedBind);
+  if ((container.Name !== expectedName && container.Name !== containerName)
+    || labels["agent-system.extension"] !== "google-cloud-platform"
+    || labels["agent-system.project"] !== project
+    || !environment.includes(`AGENT_SYSTEM_PROJECT=${project}`)
+    || !environment.includes("GCP_CLI_CALLBACK_PROXY_VERSION=2")
+    || mounts.length !== 1
+    || matchingMounts.length !== 1
+    || matchingMounts[0].Type !== "volume"
+    || matchingMounts[0].Name !== volumeName
+    || !validBinds) {
+    throw extensionError(409, "GCP_LEGACY_OWNERSHIP_UNVERIFIED", "Legacy runtime ownership or its exact Project data-volume mount could not be confirmed; resources were preserved.");
+  }
+
+  let volume;
+  try { volume = await requestDocker("GET", `/volumes/${encodeURIComponent(volumeName)}`); }
+  catch { throw extensionError(503, "GCP_LEGACY_VOLUME_INSPECT_FAILED", "The legacy Project data volume could not be inspected safely."); }
+  if (volume.status < 200 || volume.status >= 300 || volume.body?.Name !== volumeName) {
+    throw extensionError(409, "GCP_LEGACY_OWNERSHIP_UNVERIFIED", "The legacy Project data volume identity could not be confirmed; resources were preserved.");
+  }
+  const volumeLabels = volume.body?.Labels;
+  if (isRecord(volumeLabels)
+    && ((volumeLabels["agent-system.extension"] !== undefined && volumeLabels["agent-system.extension"] !== "google-cloud-platform")
+      || (volumeLabels["agent-system.project"] !== undefined && volumeLabels["agent-system.project"] !== project))) {
+    throw extensionError(409, "GCP_LEGACY_OWNERSHIP_UNVERIFIED", "The legacy Project data volume labels do not match; resources were preserved.");
+  }
+
+  const filters = encodeURIComponent(JSON.stringify({ volume: [volumeName] }));
+  let consumers;
+  try { consumers = await requestDocker("GET", `/containers/json?all=1&filters=${filters}`); }
+  catch { throw extensionError(503, "GCP_LEGACY_VOLUME_INSPECT_FAILED", "Legacy data-volume consumers could not be inspected safely."); }
+  if (consumers.status < 200 || consumers.status >= 300 || !Array.isArray(consumers.body)) {
+    throw extensionError(503, "GCP_LEGACY_VOLUME_INSPECT_FAILED", "Legacy data-volume consumers could not be inspected safely.");
+  }
+  const containerID = container.Id;
+  const targetConsumer = consumers.body.some((candidate) => candidate?.Id === containerID
+    || (Array.isArray(candidate?.Names) && candidate.Names.includes(expectedName)));
+  const foreignConsumers = consumers.body.filter((candidate) => candidate?.Id !== containerID
+    && !(Array.isArray(candidate?.Names) && candidate.Names.includes(expectedName)));
+  if (!targetConsumer || foreignConsumers.length > 0) {
+    throw extensionError(409, "GCP_LEGACY_VOLUME_OWNERSHIP_UNVERIFIED", "The legacy data volume is shared or its consumer identity is unclear; resources were preserved.");
+  }
+  return { container, containerID: typeof containerID === "string" ? containerID : containerName, containerName, project, volumeName };
+}
+
+async function removeLegacyResources(resources, requestDocker) {
+  if (resources.container.State?.Running === true) {
+    let stopped;
+    try { stopped = await requestDocker("POST", `/containers/${encodeURIComponent(resources.containerID)}/stop?t=10`); }
+    catch { throw extensionError(503, "GCP_LEGACY_CLEANUP_FAILED", "The verified legacy runtime could not be stopped; its data volume was preserved."); }
+    if (![204, 304].includes(stopped.status)) throw extensionError(503, "GCP_LEGACY_CLEANUP_FAILED", "The verified legacy runtime could not be stopped; its data volume was preserved.");
+  }
+  let removedContainer;
+  try { removedContainer = await requestDocker("DELETE", `/containers/${encodeURIComponent(resources.containerID)}?force=true&v=false`); }
+  catch { throw extensionError(503, "GCP_LEGACY_CLEANUP_FAILED", "The verified legacy runtime could not be removed; its data volume was preserved."); }
+  if (removedContainer.status !== 204) throw extensionError(503, "GCP_LEGACY_CLEANUP_FAILED", "The verified legacy runtime could not be removed; its data volume was preserved.");
+
+  let removedVolume;
+  try { removedVolume = await requestDocker("DELETE", `/volumes/${encodeURIComponent(resources.volumeName)}`); }
+  catch { throw extensionError(503, "GCP_LEGACY_CLEANUP_PARTIAL", "The legacy runtime was removed, but its verified data volume remains and needs follow-up."); }
+  if (removedVolume.status !== 204 && removedVolume.status !== 404) {
+    throw extensionError(503, "GCP_LEGACY_CLEANUP_PARTIAL", "The legacy runtime was removed, but its verified data volume remains and needs follow-up.");
+  }
+  return { cleaned: true, removedContainer: true, removedVolume: removedVolume.status === 204 };
+}
+
+function legacyContainerName(project) {
+  return `agent-system-google-cloud-platform-${slugify(project)}`;
+}
+
+function projectConfigPath(configRoot, project) {
+  if (!PROJECT_PATTERN.test(project) || configRoot !== GCLOUD_CONFIG_ROOT) {
+    throw extensionError(403, "GCP_PROJECT_CONTEXT_INVALID", "Google Cloud Platform requires a valid Project configuration.");
+  }
+  const resolved = path.posix.resolve(configRoot, project);
+  if (!isPathWithin(configRoot, resolved)) throw extensionError(403, "GCP_PROJECT_CONTEXT_INVALID", "The Project gcloud configuration path is invalid.");
+  return resolved;
+}
+
+function isPathWithin(root, candidate) {
+  const relative = path.posix.relative(root, candidate);
+  return relative !== ".." && !relative.startsWith("../") && !path.posix.isAbsolute(relative);
+}
+
+function readContainerEnvironment(values, name) {
+  if (!Array.isArray(values)) return undefined;
+  const prefix = `${name}=`;
+  const entry = values.find((value) => typeof value === "string" && value.startsWith(prefix));
+  return entry?.slice(prefix.length);
+}
+
+async function browserRemoteRequest(method, pathname, body) {
   let response;
   try {
-    response = await fetch(`${BROWSER_REMOTE_CONTROL_URL}${path}`, {
+    response = await fetch(`${BROWSER_REMOTE_CONTROL_URL}${pathname}`, {
       ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
       method,
       signal: AbortSignal.timeout(30_000),
@@ -206,236 +568,82 @@ async function browserRemoteRequest(method, path, body) {
   if (!response.ok) {
     let failure;
     try { failure = await response.json(); } catch { failure = undefined; }
-    if (failure?.code === "GCP_LOGIN_BUSY") {
-      throw extensionError(409, "GCP_LOGIN_BUSY", "This Project already has an active Google Cloud login. Wait for it to finish or expire, then retry.");
-    }
+    if (failure?.code === "GCP_LOGIN_BUSY") throw extensionError(409, "GCP_LOGIN_BUSY", "This Project already has an active Google Cloud login.");
     throw extensionError(503, "GCP_BROWSER_REMOTE_REQUEST_FAILED", "The server browser could not complete the Google login setup.");
   }
   if (response.status === 204) return undefined;
   try { return await response.json(); } catch { return undefined; }
 }
 
-async function ignoreBrowserRemoteRequest(method, path) {
-  try { await browserRemoteRequest(method, path); } catch { /* Cleanup is best effort. */ }
+async function ignoreBrowserRemoteRequest(requestBrowserRemote, method, pathname) {
+  try { await requestBrowserRemote(method, pathname); } catch { /* Session cleanup is best effort. */ }
 }
 
-function runtimeNetworks() {
-  const configured = typeof process.env.GCP_CLI_DOCKER_NETWORK === "string" ? process.env.GCP_CLI_DOCKER_NETWORK.trim() : "";
-  const networks = (configured || "agent-system-main").split(",").map((network) => network.trim()).filter(Boolean);
-  if (networks.some((network) => !/^[A-Za-z0-9_.-]{1,128}$/.test(network))) {
-    throw extensionError(503, "GCP_DOCKER_NETWORK_INVALID", "The Google Cloud CLI Docker network configuration is invalid.");
-  }
-  return [...new Set(networks)];
-}
-
-async function connectRuntimeNetworks(name, container) {
-  const attached = container.NetworkSettings?.Networks || {};
-  for (const network of runtimeNetworks()) {
-    if (Object.hasOwn(attached, network)) continue;
-    const result = await dockerRequest("POST", `/networks/${encodeURIComponent(network)}/connect`, {
-      Container: name,
-      EndpointConfig: { Aliases: [name] },
-    });
-    if (result.status !== 201 && result.status !== 409 && (result.status < 200 || result.status >= 300)) {
-      throw extensionError(503, "GCP_DOCKER_NETWORK_CONNECT_FAILED", "The Google Cloud CLI container could not join the server browser network.");
+function dockerRequest(method, pathname, body, timeoutMs = 30_000, maxResponseBytes = 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const serialized = body === undefined ? undefined : JSON.stringify(body);
+    let settled = false;
+    let request;
+    const deadline = setTimeout(() => finish(extensionError(504, "GCP_DOCKER_TIMEOUT", "A Docker operation timed out."), true), timeoutMs);
+    const finish = (error, destroy = false, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      if (destroy && request && !request.destroyed) request.destroy();
+      if (error) reject(error);
+      else resolve(value);
+    };
+    try {
+      request = httpRequest({
+        method,
+        path: pathname,
+        socketPath: DOCKER_SOCKET_PATH,
+        headers: serialized === undefined ? undefined : {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(serialized)),
+        },
+      }, (response) => {
+        const chunks = [];
+        let size = 0;
+        let truncated = false;
+        response.on("data", (chunk) => {
+          const buffer = Buffer.from(chunk);
+          const remaining = Math.max(0, maxResponseBytes - size);
+          if (remaining) chunks.push(buffer.subarray(0, remaining));
+          if (buffer.length > remaining) truncated = true;
+          size += buffer.length;
+        });
+        response.on("error", (error) => finish(extensionError(503, "GCP_DOCKER_UNAVAILABLE", "Docker is unavailable.")));
+        response.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          let parsed;
+          try { parsed = text ? JSON.parse(text) : undefined; } catch { parsed = undefined; }
+          finish(undefined, false, { body: parsed, status: response.statusCode || 500, text, truncated });
+        });
+      });
+      request.on("error", () => finish(extensionError(503, "GCP_DOCKER_UNAVAILABLE", "Docker is unavailable.")));
+      request.setTimeout(timeoutMs, () => finish(extensionError(504, "GCP_DOCKER_TIMEOUT", "A Docker operation timed out."), true));
+      if (serialized !== undefined) request.write(serialized);
+      request.end();
+    } catch {
+      finish(extensionError(503, "GCP_DOCKER_UNAVAILABLE", "Docker is unavailable."), true);
     }
-  }
-}
-
-async function readLoginUrl(container) {
-  const output = await runExec(container, ["bash", "-lc", `cat ${RUNTIME_ROOT}/agent-system-login.log 2>/dev/null || true`]);
-  return extractAuthorizationUrl(output);
-}
-
-async function readLoginLog(container) {
-  try { return await runExec(container, ["bash", "-lc", `cat ${RUNTIME_ROOT}/agent-system-login.log 2>/dev/null || true`]); }
-  catch { return ""; }
-}
-
-async function isLoginProcessActive(container) {
-  try {
-    await runExec(container, ["bash", "-c", `login_pid=$(cat ${RUNTIME_ROOT}/agent-system-login.pid 2>/dev/null || true); test -n "$login_pid" && test -r "/proc/$login_pid/cmdline" && tr '\\000' ' ' < "/proc/$login_pid/cmdline" | grep -Eq '(^|[ /])gcloud(\\.py)?[[:space:]]+auth[[:space:]]+login([[:space:]]|$)'`]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function cancelPendingLogin(container) {
-  await runExec(container, ["bash", "-c", `login_pid=$(cat ${RUNTIME_ROOT}/agent-system-login.pid 2>/dev/null || true); if test -n "$login_pid" && test -r "/proc/$login_pid/cmdline" && tr '\\000' ' ' < "/proc/$login_pid/cmdline" | grep -Eq '(^|[ /])gcloud(\\.py)?[[:space:]]+auth[[:space:]]+login([[:space:]]|$)'; then pkill -TERM -P "$login_pid" 2>/dev/null || true; kill -TERM "$login_pid" 2>/dev/null || true; fi; rm -f ${RUNTIME_ROOT}/agent-system-login.log ${RUNTIME_ROOT}/agent-system-login.pid ${CALLBACK_PORT_PATH}`]).catch(() => undefined);
-}
-
-export function isGcloudLoginProcessCommandLine(commandLine) {
-  return /(?:^|[\s/])gcloud(?:\.py)?\s+auth\s+login(?:\s|$)/.test(String(commandLine).replaceAll("\0", " "));
-}
-
-async function waitForLoginUrl(container) {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    const url = await readLoginUrl(container);
-    if (url) return url;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  throw extensionError(504, "GCP_LOGIN_URL_TIMEOUT", "The Google Cloud CLI did not produce a browser authorization URL.");
-}
-
-function extractAuthorizationUrl(output) {
-  const match = String(output).match(/https:\/\/accounts\.google\.com\/[^\s"']+/);
-  if (!match) return undefined;
-  try {
-    const url = new URL(match[0]);
-    const redirectUri = new URL(url.searchParams.get("redirect_uri") || "");
-    return url.hostname === "accounts.google.com"
-      && url.pathname.startsWith("/")
-      && redirectUri.protocol === "http:"
-      && redirectUri.hostname === "localhost"
-      && redirectUri.pathname === "/"
-      && Number(redirectUri.port) >= 1024
-      && Number(redirectUri.port) <= 65_535
-      ? url.toString()
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function runExec(container, command, detached = false) {
-  const created = await dockerRequest("POST", `/containers/${encodeURIComponent(container)}/exec`, {
-    AttachStdout: !detached,
-    AttachStderr: !detached,
-    AttachStdin: false,
-    Tty: false,
-    Cmd: command,
   });
-  const id = created.body?.Id;
-  if (created.status < 200 || created.status >= 300 || typeof id !== "string") throw extensionError(503, "GCP_EXEC_CREATE_FAILED", "A Google Cloud CLI operation could not be started.");
-  const started = await dockerRequest("POST", `/exec/${encodeURIComponent(id)}/start`, { Detach: detached, Tty: false }, 120_000);
-  if (started.status < 200 || started.status >= 300) throw extensionError(503, "GCP_EXEC_START_FAILED", "A Google Cloud CLI operation could not be started.");
-  if (detached) return "";
-  const output = decodeDockerStream(started.text || "");
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    const inspected = await dockerRequest("GET", `/exec/${encodeURIComponent(id)}/json`);
-    if (inspected.body?.Running === false) {
-      if (inspected.body.ExitCode !== 0) throw extensionError(503, "GCP_CLI_COMMAND_FAILED", "The Google Cloud CLI operation failed.");
-      return output;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw extensionError(504, "GCP_CLI_COMMAND_TIMEOUT", "The Google Cloud CLI operation timed out.");
-}
-
-async function runGcloudCommand(container, args) {
-  const created = await dockerRequest("POST", `/containers/${encodeURIComponent(container)}/exec`, {
-    AttachStderr: true,
-    AttachStdin: false,
-    AttachStdout: true,
-    Cmd: ["gcloud", ...args],
-    Env: ["CLOUDSDK_CORE_DISABLE_PROMPTS=1"],
-    Tty: true,
-  });
-  const id = created.body?.Id;
-  if (created.status < 200 || created.status >= 300 || typeof id !== "string") {
-    throw extensionError(503, "GCP_EXEC_CREATE_FAILED", "The gcloud command could not be started.");
-  }
-  const started = await dockerRequest("POST", `/exec/${encodeURIComponent(id)}/start`, { Detach: false, Tty: true }, 120_000, 128 * 1024);
-  if (started.status < 200 || started.status >= 300) throw extensionError(503, "GCP_EXEC_START_FAILED", "The gcloud command could not be started.");
-  const deadline = Date.now() + 120_000;
-  while (Date.now() < deadline) {
-    const inspected = await dockerRequest("GET", `/exec/${encodeURIComponent(id)}/json`);
-    if (inspected.body?.Running === false) {
-      return {
-        exitCode: Number.isInteger(inspected.body.ExitCode) ? inspected.body.ExitCode : 1,
-        output: started.text.slice(0, 60_000),
-        truncated: started.truncated === true || started.text.length > 60_000,
-      };
-    }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw extensionError(504, "GCP_CLI_COMMAND_TIMEOUT", "The gcloud command exceeded the 120 second execution limit.");
-}
-
-function assertProjectRequest(request, project) {
-  if (request.query?.scope !== "project" || request.query?.project !== project) {
-    throw extensionError(403, "GCP_PROJECT_CONTEXT_INVALID", "The gcloud command must use the active Project context.");
-  }
-}
-
-function readGcloudArguments(body) {
-  if (!isRecord(body) || Object.keys(body).length !== 1 || !Array.isArray(body.args)) {
-    throw extensionError(400, "GCP_COMMAND_ARGUMENTS_INVALID", "Provide gcloud command arguments as an array.");
-  }
-  const args = body.args;
-  if (args.length < 1 || args.length > 64 || args.some((value) => typeof value !== "string" || value.length === 0 || value.length > 2_048 || value.includes("\0"))) {
-    throw extensionError(400, "GCP_COMMAND_ARGUMENTS_INVALID", "gcloud accepts 1 to 64 non-empty command arguments, each at most 2048 characters.");
-  }
-  if (args.reduce((length, value) => length + value.length, 0) > 8_192) {
-    throw extensionError(400, "GCP_COMMAND_ARGUMENTS_INVALID", "The gcloud command arguments exceed the 8192 character limit.");
-  }
-  const normalized = args.map((value) => value.toLowerCase());
-  const safeAuthRead = normalized[0] === "auth" && new Set(["list", "status", "describe"]).has(normalized[1]);
-  const credentialCommands = [
-    ["auth", "print-access-token"],
-    ["auth", "print-identity-token"],
-    ["auth", "login"],
-    ["auth", "revoke"],
-    ["auth", "activate-service-account"],
-    ["auth", "application-default", "print-access-token"],
-    ["auth", "application-default", "login"],
-    ["auth", "application-default", "revoke"],
-    ["config", "config-helper"],
-  ];
-  const printsCredential = credentialCommands.some((sequence) => containsSequence(normalized, sequence));
-  const unsupportedAuth = normalized[0] === "auth" && !safeAuthRead;
-  if (printsCredential || unsupportedAuth) {
-    throw extensionError(403, "GCP_CREDENTIAL_COMMAND_FORBIDDEN", "Credential-management and token-printing commands are handled by the Extension login controls.");
-  }
-  return [...args];
-}
-
-function containsSequence(values, sequence) {
-  return values.some((_, start) => sequence.every((value, offset) => values[start + offset] === value));
 }
 
 function decodeDockerStream(value) {
   const data = Buffer.from(value, "utf8");
-  const chunks = [];
+  const stdout = [];
   let offset = 0;
   while (offset + 8 <= data.length) {
+    const stream = data[offset];
     const length = data.readUInt32BE(offset + 4);
-    if (offset + 8 + length > data.length) break;
-    chunks.push(data.subarray(offset + 8, offset + 8 + length));
+    if ((stream !== 1 && stream !== 2) || data[offset + 1] !== 0 || data[offset + 2] !== 0 || data[offset + 3] !== 0 || offset + 8 + length > data.length) return value;
+    if (stream === 1) stdout.push(data.subarray(offset + 8, offset + 8 + length));
     offset += 8 + length;
   }
-  return chunks.length ? Buffer.concat(chunks).toString("utf8") : value;
-}
-
-function dockerRequest(method, path, body, timeoutMs = 30_000, maxResponseBytes = Number.MAX_SAFE_INTEGER) {
-  return new Promise((resolve, reject) => {
-    const serialized = body === undefined ? undefined : JSON.stringify(body);
-    const request = httpRequest({ method, path, socketPath: DOCKER_SOCKET_PATH, headers: { Accept: "application/json", ...(serialized === undefined ? {} : { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(serialized) }) } }, (response) => {
-      const chunks = [];
-      let bytes = 0;
-      let truncated = false;
-      response.on("data", (chunk) => {
-        const value = Buffer.from(chunk);
-        const available = Math.max(0, maxResponseBytes - bytes);
-        if (available > 0) chunks.push(value.subarray(0, available));
-        if (value.length > available) truncated = true;
-        bytes += value.length;
-      });
-      response.on("end", () => {
-        const text = Buffer.concat(chunks).toString("utf8");
-        let parsed;
-        try { parsed = text ? JSON.parse(text) : undefined; } catch { parsed = undefined; }
-        resolve({ status: response.statusCode || 500, body: parsed, text, truncated });
-      });
-    });
-    request.setTimeout(timeoutMs, () => request.destroy(extensionError(504, "GCP_DOCKER_TIMEOUT", "A Google Cloud Docker operation timed out.")));
-    request.on("error", (error) => reject(error.statusCode ? error : extensionError(503, "GCP_DOCKER_UNAVAILABLE", "Docker is unavailable.")));
-    if (serialized !== undefined) request.write(serialized);
-    request.end();
-  });
+  if (offset !== data.length) return value;
+  return Buffer.concat(stdout).toString("utf8");
 }
 
 function requireProject(value) {
@@ -445,7 +653,9 @@ function requireProject(value) {
 }
 
 function slugify(value) { return value.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "project"; }
+function trimTrailingSlash(value) { return String(value).replace(/\/+$/, ""); }
 function noStoreHeaders() { return { "cache-control": "no-store" }; }
 function isRecord(value) { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function safeErrorCode(error) { return typeof error?.code === "string" ? error.code : "GCP_RUNTIME_PREFLIGHT_FAILED"; }
 function extensionError(statusCode, code, message) { const error = new Error(message); error.statusCode = statusCode; error.code = code; return error; }
-function trimTrailingSlash(value) { return String(value).replace(/\/+$/, ""); }
+function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }

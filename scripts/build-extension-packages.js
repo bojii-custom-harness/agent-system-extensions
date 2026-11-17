@@ -11,7 +11,13 @@ const execFile = promisify(execFileCallback);
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGES = join(ROOT, "packages");
 const EXTENSION_IDS = ["azure-devops-platform", "google-cloud-platform", "gitlab", "open-design", "xmind"];
-const RELEASE_VERSION = "2.0.0";
+const RELEASE_VERSIONS = {
+  "azure-devops-platform": "2.0.0",
+  "google-cloud-platform": "2.0.1",
+  gitlab: "2.0.0",
+  "open-design": "2.0.0",
+  xmind: "2.0.0",
+};
 const CRC_TABLE = Array.from({ length: 256 }, (_, index) => {
   let value = index;
   for (let bit = 0; bit < 8; bit += 1) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
@@ -20,6 +26,7 @@ const CRC_TABLE = Array.from({ length: 256 }, (_, index) => {
 
 export async function buildExtensionPackage(extensionId) {
   if (!EXTENSION_IDS.includes(extensionId)) throw new Error(`Unknown formal Extension package: ${extensionId}`);
+  const releaseVersion = RELEASE_VERSIONS[extensionId];
   const packageRoot = join(PACKAGES, extensionId);
   const sourceRoot = join(packageRoot, "source");
   const files = await readTree(sourceRoot);
@@ -28,7 +35,7 @@ export async function buildExtensionPackage(extensionId) {
   if (extensionId === "xmind") await addGeneratedXmindWorkflows(packageRoot, files);
   const manifest = JSON.parse(files.get("extension.json").toString("utf8"));
   if (manifest.extensionId !== extensionId) throw new Error(`${extensionId} source manifest declares another Extension identity`);
-  manifest.version = RELEASE_VERSION;
+  manifest.version = releaseVersion;
   updateDeclaredIntegrity(files, manifest, "backend");
   updateDeclaredIntegrity(files, manifest, "frontend");
   updateDeclaredIntegrity(files, manifest, "configuration");
@@ -47,7 +54,8 @@ export async function buildAllExtensionPackages({ verify = false } = {}) {
   for (const extensionId of EXTENSION_IDS) {
     const { archive, manifest } = await buildExtensionPackage(extensionId);
     const packageRoot = join(PACKAGES, extensionId);
-    const assetName = `${extensionId}-${RELEASE_VERSION}.aicxt`;
+    const releaseVersion = RELEASE_VERSIONS[extensionId];
+    const assetName = `${extensionId}-${releaseVersion}.aicxt`;
     const assetPath = join(packageRoot, assetName);
     const buildInfo = await createBuildInfo(extensionId, archive);
     const buildInfoBytes = Buffer.from(`${JSON.stringify(buildInfo, null, 2)}\n`, "utf8");
@@ -68,12 +76,13 @@ export async function buildAllExtensionPackages({ verify = false } = {}) {
 async function createBuildInfo(extensionId, archive) {
   const packageRoot = join(PACKAGES, extensionId);
   const source = JSON.parse(await readFile(join(packageRoot, "source.json"), "utf8"));
-  const assetName = `${extensionId}-${RELEASE_VERSION}.aicxt`;
+  const releaseVersion = RELEASE_VERSIONS[extensionId];
+  const assetName = `${extensionId}-${releaseVersion}.aicxt`;
   return {
     extensionId,
-    version: RELEASE_VERSION,
+    version: releaseVersion,
     channel: "stable",
-    tag: `${extensionId}-${RELEASE_VERSION}`,
+    tag: `${extensionId}-${releaseVersion}`,
     sourceRevision: source.sourceRevision,
     sourceTree: source.sourceTree,
     sourcePath: source.sourcePath,
@@ -222,19 +231,20 @@ async function main() {
   }
   if (extensionIds.length === 1) {
     const id = extensionIds[0];
+    const releaseVersion = RELEASE_VERSIONS[id];
     const { archive } = await buildExtensionPackage(id);
     const packageRoot = join(PACKAGES, id);
-    const assetPath = join(packageRoot, `${id}-${RELEASE_VERSION}.aicxt`);
+    const assetPath = join(packageRoot, `${id}-${releaseVersion}.aicxt`);
     const buildInfoBytes = Buffer.from(`${JSON.stringify(await createBuildInfo(id, archive), null, 2)}\n`, "utf8");
     if (verify) {
       const tracked = await readFile(assetPath);
       const trackedBuildInfo = await readFile(join(packageRoot, "build-info.json"));
       if (!tracked.equals(archive) || !trackedBuildInfo.equals(buildInfoBytes)) throw new Error(`${id} build is stale; run npm run extensions:build`);
-      process.stdout.write(`${id} ${RELEASE_VERSION} archive verified: ${createHash("sha256").update(tracked).digest("hex")}\n`);
+      process.stdout.write(`${id} ${releaseVersion} archive verified: ${createHash("sha256").update(tracked).digest("hex")}\n`);
     } else {
       await atomicWrite(assetPath, archive);
       await atomicWrite(join(packageRoot, "build-info.json"), buildInfoBytes);
-      process.stdout.write(`${id} ${RELEASE_VERSION} package built.\n`);
+      process.stdout.write(`${id} ${releaseVersion} package built.\n`);
     }
     return;
   }

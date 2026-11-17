@@ -7,10 +7,14 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test && node --experimental-strip-types --test packages/google-cloud-platform/tests/google-cloud-platform.test.ts",
+    "test:gcp-ui": "playwright test --config=playwright.gcp.config.ts",
     "fixture:build": "node scripts/build-synthetic-fixture.js",
     "fixture:verify": "node scripts/build-synthetic-fixture.js --verify",
     "extensions:build": "node scripts/build-extension-packages.js",
     "extensions:verify": "node scripts/build-extension-packages.js --verify"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1"
   }
 }

@@ -19,8 +19,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - run: npm ci
       - run: npm test
       - run: npm run extensions:verify
+      - if: startsWith(github.ref_name, 'google-cloud-platform-')
+        run: npx playwright install --with-deps chromium
+      - if: startsWith(github.ref_name, 'google-cloud-platform-')
+        run: npm run test:gcp-ui
       - if: startsWith(github.ref_name, 'synthetic-')
         run: npm run fixture:verify
       - name: Validate, publish and anonymously verify the exact package asset
