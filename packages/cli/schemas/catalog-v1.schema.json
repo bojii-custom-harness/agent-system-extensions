@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/jason23452/agent-system-extensions/main/packages/cli/schemas/catalog-v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/bojii-custom-harness/agent-system-extensions/main/packages/cli/schemas/catalog-v1.schema.json",
   "title": "Agent System Extension Catalog v1",
   "description": "Complete, immutable Extension release identities published by agent-system-extensions.",
   "type": "object",

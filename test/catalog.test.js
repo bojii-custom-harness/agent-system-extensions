@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { catalogEntryFromRelease, mergeCatalogs, validateCatalog } from "../packages/cli/src/catalog.js";
 import { manifestFor, releaseFor } from "../test-support/fixtures.js";
+
+test("the checked-in catalog uses canonical organization release URLs", async () => {
+  const catalog = JSON.parse(await readFile(new URL("../catalog.json", import.meta.url), "utf8"));
+
+  assert.equal(validateCatalog(catalog), true);
+});
 
 test("an empty versioned catalog is valid", () => {
   assert.equal(validateCatalog({ schemaVersion: 1, extensions: [] }), true);
@@ -18,7 +25,7 @@ test("a catalog entry records exact release identity, channel, asset hash and ma
     tag: "synthetic-fixture-1.2.3",
     asset: {
       name: "synthetic-fixture-1.2.3.aicxt",
-      url: "https://github.com/jason23452/agent-system-extensions/releases/download/synthetic-fixture-1.2.3/synthetic-fixture-1.2.3.aicxt",
+      url: "https://github.com/bojii-custom-harness/agent-system-extensions/releases/download/synthetic-fixture-1.2.3/synthetic-fixture-1.2.3.aicxt",
       sha256: "a1f0b76d5f4a3b2be13a4ee67b1e954424c2a33ab59d4a6882da9737760ae115",
       size: release.assetBytes.length,
     },

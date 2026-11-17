@@ -3,7 +3,7 @@ import { readAicxtManifest } from "./zip.js";
 
 export const CATALOG_SCHEMA_VERSION = 1;
 export const EXTENSION_PACKAGE_SCHEMA = "agent-system.extension-package.v1";
-export const RELEASE_REPOSITORY = Object.freeze({ owner: "jason23452", repository: "agent-system-extensions" });
+export const RELEASE_REPOSITORY = Object.freeze({ owner: "bojii-custom-harness", repository: "agent-system-extensions" });
 
 const extensionIdPattern = /^[a-z0-9][a-z0-9_.-]{0,63}$/;
 const semverPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;

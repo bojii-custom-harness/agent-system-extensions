@@ -6,7 +6,7 @@ import { Transform, Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { validateCatalog } from "./catalog.js";
 
-export const DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/jason23452/agent-system-extensions/main/catalog.json";
+export const DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/bojii-custom-harness/agent-system-extensions/main/catalog.json";
 const MAX_CATALOG_BYTES = 5 * 1024 * 1024;
 
 async function responseBuffer(response, maxBytes) {

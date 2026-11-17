@@ -11,7 +11,7 @@ export class GitHubApiError extends Error {
 }
 
 export function repositoryFromEnvironment() {
-  const value = process.env.GITHUB_REPOSITORY ?? "jason23452/agent-system-extensions";
+  const value = process.env.GITHUB_REPOSITORY ?? "bojii-custom-harness/agent-system-extensions";
   const [owner, repository, ...extra] = value.split("/");
   if (!owner || !repository || extra.length > 0) throw new Error("GITHUB_REPOSITORY must have the owner/repository form");
   return { owner, repository };

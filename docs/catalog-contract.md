@@ -25,7 +25,7 @@
 - `compatibility.agentSystem`：manifest 宣告的 host range；未宣告時使用 `*`（沒有額外限制）。其他 compatibility 欄位可由後續 package contract 擴充。
 - `metadata`：`displayName`、`description` 與完整 package `metadata` 物件，供目錄消費端使用；目錄不含套件的程式碼內容。
 
-Release URL 固定為 `https://github.com/jason23452/agent-system-extensions/releases/download/<tag>/<tag>.aicxt`。下載器會先完整驗證目錄，再依指定 `id`、`channel`、`version` 唯一選取；缺少或不相符即失敗，不查 repo `latest`。
+Release URL 固定為 `https://github.com/bojii-custom-harness/agent-system-extensions/releases/download/<tag>/<tag>.aicxt`。下載器會先完整驗證目錄，再依指定 `id`、`channel`、`version` 唯一選取；缺少或不相符即失敗，不查 repo `latest`。
 
 Catalog updater 只 GET 目前 `main/catalog.json`、驗證 schema 並原子寫入呼叫端指定路徑；不解析 Release、不下載 `.aicxt`、不安裝套件。
 

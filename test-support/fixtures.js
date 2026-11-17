@@ -95,7 +95,7 @@ export function releaseFor({ version = "1.2.3", prerelease = version.includes("-
         size: assetBytes.length,
         digest: `sha256:${digest}`,
         state: "uploaded",
-        browser_download_url: `https://github.com/jason23452/agent-system-extensions/releases/download/${tag}/${assetName}`,
+        browser_download_url: `https://github.com/bojii-custom-harness/agent-system-extensions/releases/download/${tag}/${assetName}`,
       }],
     },
   };
