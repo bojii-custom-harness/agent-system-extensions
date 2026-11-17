@@ -1,14 +1,14 @@
 {
   "extensionId": "google-cloud-platform",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "channel": "stable",
-  "tag": "google-cloud-platform-2.0.1",
+  "tag": "google-cloud-platform-2.0.2",
   "sourceRevision": "ccf5672c8ef5c43abbc89896a98b0760bddf74ef",
   "sourceTree": "5d615e29fced7a0aa776df07d30d155c88c6279f",
   "sourcePath": "backend/extension-packages/google-cloud-platform",
   "artifact": {
-    "name": "google-cloud-platform-2.0.1.aicxt",
-    "size": 14446,
-    "sha256": "15d88bc4b44a4827a7b86efeb40bf9d46c7d690a677494528d277f7cd20009c8"
+    "name": "google-cloud-platform-2.0.2.aicxt",
+    "size": 14529,
+    "sha256": "e85ee134a3892c2450bbc658bf7d1119ed902370f4ce8a83423777711909ae34"
   }
 }

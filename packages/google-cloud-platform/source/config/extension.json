@@ -3,7 +3,7 @@
     {
       "id": "google-cloud-platform",
       "displayName": "Google Cloud Platform",
-      "description": "由 main OpenCode runtime 透過遠端瀏覽器完成 Google 登入；main 與 workflow-test 共用持久化 gcloud 設定，日常操作使用 shell gcloud。",
+      "description": "由 main OpenCode runtime 透過遠端瀏覽器完成 Google 登入；main 與 workflow-test 共用 Extension data volume 中的 GCP 命名空間，日常操作使用 shell gcloud。",
       "shortName": "GCP"
     }
   ]

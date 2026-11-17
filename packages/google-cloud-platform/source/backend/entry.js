@@ -4,8 +4,9 @@ import { request as httpRequest } from "node:http";
 
 const PROJECT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
 const RUNTIME_CONTAINER_DEFAULT = "agent-system-opencode-server";
-const GCLOUD_VOLUME_DESTINATION = "/var/lib/agent-system/gcloud";
-const GCLOUD_CONFIG_ROOT = `${GCLOUD_VOLUME_DESTINATION}/projects`;
+const EXTENSION_DATA_VOLUME_DESTINATION = "/var/lib/agent-system/extensions";
+const EXTENSION_DATA_ROOT = EXTENSION_DATA_VOLUME_DESTINATION;
+const GCLOUD_CONFIG_ROOT = `${EXTENSION_DATA_ROOT}/google-cloud-platform/projects`;
 const LEGACY_CONFIG_DESTINATION = "/root/.config/gcloud";
 const LOGIN_TEMP_ROOT = "/tmp/agent-system-gcp-login";
 const GOOGLE_CLOUD_CLI_VERSION = "558.0.0";
@@ -245,7 +246,7 @@ async function preflightMainRuntime(project, requestDocker, containerName, { cre
   }
   if (createProjectConfig) {
     const result = await executeRuntimeCommand(runtime, project, ["/bin/sh", "-lc", 'test ! -L "$CLOUDSDK_CONFIG" && mkdir -p -- "$CLOUDSDK_CONFIG" && test ! -L "$CLOUDSDK_CONFIG" && test -d "$CLOUDSDK_CONFIG" && test -w "$CLOUDSDK_CONFIG"'], requestDocker, containerName, { timeoutMs: 15_000 });
-    if (result.exitCode !== 0) throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime shared gcloud configuration is not writable.");
+    if (result.exitCode !== 0) throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime Project gcloud configuration is not writable.");
   }
   return { ...runtime, configPath, version: GOOGLE_CLOUD_CLI_VERSION };
 }
@@ -266,13 +267,14 @@ async function inspectMainRuntime(requestDocker, containerName) {
     throw extensionError(503, "GCP_RUNTIME_UNAVAILABLE", "The main OpenCode runtime is not running.");
   }
   const mounts = Array.isArray(container.Mounts) ? container.Mounts : [];
-  const sharedMounts = mounts.filter((mount) => mount?.Destination === GCLOUD_VOLUME_DESTINATION);
+  const sharedMounts = mounts.filter((mount) => mount?.Destination === EXTENSION_DATA_VOLUME_DESTINATION);
   if (sharedMounts.length !== 1 || sharedMounts[0].Type !== "volume" || typeof sharedMounts[0].Name !== "string" || !sharedMounts[0].Name) {
-    throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime shared gcloud volume is not mounted as expected.");
+    throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime Extension data volume is not mounted as expected.");
   }
-  const configRoot = readContainerEnvironment(container.Config?.Env, "AGENT_SYSTEM_GCLOUD_CONFIG_ROOT");
-  if (configRoot !== GCLOUD_CONFIG_ROOT || !isPathWithin(GCLOUD_VOLUME_DESTINATION, configRoot)) {
-    throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime gcloud configuration root does not match the shared volume.");
+  const extensionDataRoot = readContainerEnvironment(container.Config?.Env, "AGENT_SYSTEM_EXTENSION_DATA_ROOT");
+  const configRoot = `${EXTENSION_DATA_ROOT}/google-cloud-platform/projects`;
+  if (extensionDataRoot !== EXTENSION_DATA_ROOT || !isPathWithin(EXTENSION_DATA_ROOT, configRoot)) {
+    throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime Extension data root does not match the shared volume.");
   }
   return { containerName, configRoot, volumeName: sharedMounts[0].Name };
 }

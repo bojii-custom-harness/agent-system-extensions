@@ -1,6 +1,6 @@
 # Agent System Extensions 分發 repo
 
-此公開 repo 維護共用 Extension Catalog 契約、精確版本下載器、僅更新 catalog 的 CLI，以及發布自動化。五套正式 Extension 的 source、專屬測試、builder 與發布產物位於 `packages/`；各 Extension 獨立演進版本，GCP runtime 更新版為 `2.0.1`，其既有 `2.0.0` Release 保持不變。
+此公開 repo 維護共用 Extension Catalog 契約、精確版本下載器、僅更新 catalog 的 CLI，以及發布自動化。五套正式 Extension 的 source、專屬測試、builder 與發布產物位於 `packages/`；各 Extension 獨立演進版本，GCP runtime 更新版為 `2.0.2`，既有 `2.0.0`、`2.0.1` Releases 保持不變。
 
 ## Release 契約
 

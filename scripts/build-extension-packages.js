@@ -13,7 +13,7 @@ const PACKAGES = join(ROOT, "packages");
 const EXTENSION_IDS = ["azure-devops-platform", "google-cloud-platform", "gitlab", "open-design", "xmind"];
 const RELEASE_VERSIONS = {
   "azure-devops-platform": "2.0.0",
-  "google-cloud-platform": "2.0.1",
+  "google-cloud-platform": "2.0.2",
   gitlab: "2.0.0",
   "open-design": "2.0.0",
   xmind: "2.0.0",

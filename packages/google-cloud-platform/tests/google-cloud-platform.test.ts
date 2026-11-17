@@ -8,10 +8,11 @@ import { buildExtensionPackage } from "../../../scripts/build-extension-packages
 import { buildBrowserRemoteUrl, createGoogleCloudPlatformBackend, parseAuthorizationCallback } from "../source/backend/entry.js";
 
 const packageRoot = fileURLToPath(new URL("../source/", import.meta.url));
-const archivePath = fileURLToPath(new URL("../google-cloud-platform-2.0.1.aicxt", import.meta.url));
+const archivePath = fileURLToPath(new URL("../google-cloud-platform-2.0.2.aicxt", import.meta.url));
 const expectedPackageFiles = ["backend/entry.js", "config/extension.json", "extension.json", "frontend/entry.js"];
 const runtimeName = "synthetic-main-runtime";
-const runtimeConfigRoot = "/var/lib/agent-system/gcloud/projects";
+const runtimeExtensionDataRoot = "/var/lib/agent-system/extensions";
+const runtimeConfigRoot = `${runtimeExtensionDataRoot}/google-cloud-platform/projects`;
 const sharedVolumeName = "synthetic-gcloud-shared-volume";
 const syntheticAuthorizationUrl = "https://accounts.google.com/o/oauth2/auth?state=synthetic-state-123&redirect_uri=http%3A%2F%2Flocalhost%3A34001%2F";
 
@@ -23,13 +24,13 @@ test("GCP package archives the main-runtime login UI without the gcloud_cli cont
   const buildInfo = JSON.parse(await readFile(new URL("../build-info.json", import.meta.url), "utf8"));
   const archivedFiles = [...files.keys()].sort();
 
-  assert.equal(manifest.version, "2.0.1");
+  assert.equal(manifest.version, "2.0.2");
   assert.equal(manifest.scope, "project");
   assert.deepEqual(archivedFiles, expectedPackageFiles);
   assert.deepEqual(archive, builtArchive);
   assert.equal(archivedManifest.extensionId, "google-cloud-platform");
-  assert.equal(archivedManifest.version, "2.0.1");
-  assert.equal(buildInfo.version, "2.0.1");
+  assert.equal(archivedManifest.version, "2.0.2");
+  assert.equal(buildInfo.version, "2.0.2");
   assert.equal(buildInfo.artifact.sha256, createHash("sha256").update(archive).digest("hex"));
   assert.equal(manifest.resources, undefined);
   assert.equal(manifest.pluginContributions, undefined);
@@ -46,7 +47,7 @@ test("GCP package archives the main-runtime login UI without the gcloud_cli cont
   const frontend = files.get("frontend/entry.js")!.toString("utf8");
   const backend = files.get("backend/entry.js")!.toString("utf8");
   const configuration = JSON.parse(files.get("config/extension.json")!.toString("utf8")) as Record<string, any>;
-  assert.match(frontend, /version: "2\.0\.1"/);
+  assert.match(frontend, /version: "2\.0\.2"/);
   assert.match(frontend, /main runtime 的 gcloud listener 直接接收/);
   assert.match(frontend, /Project 設定目錄只是預設選擇，不是存取控制/);
   assert.match(frontend, /legacy-cleanup/);
@@ -57,7 +58,7 @@ test("GCP package archives the main-runtime login UI without the gcloud_cli cont
   assert.deepEqual(configuration.platforms, [{
     id: "google-cloud-platform",
     displayName: "Google Cloud Platform",
-    description: "由 main OpenCode runtime 透過遠端瀏覽器完成 Google 登入；main 與 workflow-test 共用持久化 gcloud 設定，日常操作使用 shell gcloud。",
+    description: "由 main OpenCode runtime 透過遠端瀏覽器完成 Google 登入；main 與 workflow-test 共用 Extension data volume 中的 GCP 命名空間，日常操作使用 shell gcloud。",
     shortName: "GCP",
   }]);
 });
@@ -373,10 +374,10 @@ function createRuntimeFixture(options: {
           Name: `/${runtimeName}`,
           State: { Running: true },
           Config: {
-            Env: [`AGENT_SYSTEM_GCLOUD_CONFIG_ROOT=${runtimeConfigRoot}`],
+            Env: [`AGENT_SYSTEM_EXTENSION_DATA_ROOT=${runtimeExtensionDataRoot}`],
             Labels: { "com.docker.compose.service": "opencode-server" },
           },
-          Mounts: [{ Destination: "/var/lib/agent-system/gcloud", Name: sharedVolumeName, Type: "volume" }],
+          Mounts: [{ Destination: runtimeExtensionDataRoot, Name: sharedVolumeName, Type: "volume" }],
         },
       };
     }

@@ -3,7 +3,7 @@ const STYLE = `.gcp{display:grid;gap:16px;max-width:680px;margin:0 auto;padding:
 export async function activate(host) {
   return {
     extensionId: "google-cloud-platform",
-    version: "2.0.1",
+    version: "2.0.2",
     editor: { mount(container) { return mount(host, container); } },
   };
 }
@@ -16,7 +16,7 @@ function mount(host, container) {
   const root = document.createElement("section");
   root.className = "gcp";
   root.setAttribute("aria-label", "Google Cloud Platform gcloud runtime");
-  root.innerHTML = `<h1>Google Cloud Platform</h1><p>gcloud CLI 在 main OpenCode runtime 執行；main 與 workflow-test runtime 共用此部署的持久化設定。</p><section class="gcp-card"><strong>Google Cloud CLI 登入</strong><p data-status class="gcp-status" role="status" aria-live="polite">正在檢查 gcloud 登入狀態。</p><div class="gcp-actions"><button data-login type="button">使用 Google 帳戶登入</button><button data-cancel class="secondary" type="button" hidden>取消登入</button><button data-retry class="gcp-retry" type="button" data-visible="false">重試登入</button><button class="secondary" data-logout type="button">登出</button></div><p>授權頁會在 Agent System 的遠端瀏覽器開啟；Google 的 localhost 回呼由 main runtime 的 gcloud listener 直接接收。</p><p>shell gcloud 可讀寫同部署所有 Project 的憑證；Project 設定目錄只是預設選擇，不是存取控制，也不提供 token 輸出封鎖。</p></section><section class="gcp-card"><strong>舊版 gcloud runtime 清理</strong><p data-cleanup-status class="gcp-status" aria-live="polite">正在檢查安裝與 runtime 預檢狀態。</p><div class="gcp-actions"><button data-cleanup class="secondary" type="button" hidden>清除此 Project 的舊版 runtime 與資料</button></div><p>只會在新版 Extension 安裝完成且 main runtime／shared volume 預檢通過後，提供此 Project 的明確清理操作；不會遷移舊登入資料。</p></section>`;
+  root.innerHTML = `<h1>Google Cloud Platform</h1><p>gcloud CLI 在 main OpenCode runtime 執行；main 與 workflow-test runtime 共用 Extension data volume 中的 Google Cloud Platform 命名空間。</p><section class="gcp-card"><strong>Google Cloud CLI 登入</strong><p data-status class="gcp-status" role="status" aria-live="polite">正在檢查 gcloud 登入狀態。</p><div class="gcp-actions"><button data-login type="button">使用 Google 帳戶登入</button><button data-cancel class="secondary" type="button" hidden>取消登入</button><button data-retry class="gcp-retry" type="button" data-visible="false">重試登入</button><button class="secondary" data-logout type="button">登出</button></div><p>授權頁會在 Agent System 的遠端瀏覽器開啟；Google 的 localhost 回呼由 main runtime 的 gcloud listener 直接接收。</p><p>shell gcloud 可讀寫同部署所有 Project 的憑證；Project 設定目錄只是預設選擇，不是存取控制，也不提供 token 輸出封鎖。</p></section><section class="gcp-card"><strong>舊版 gcloud runtime 清理</strong><p data-cleanup-status class="gcp-status" aria-live="polite">正在檢查安裝與 runtime 預檢狀態。</p><div class="gcp-actions"><button data-cleanup class="secondary" type="button" hidden>清除此 Project 的舊版 runtime 與資料</button></div><p>只會在新版 Extension 安裝完成且 main runtime／Extension data volume 預檢通過後，提供此 Project 的明確清理操作；不會遷移舊登入資料。</p></section>`;
   container.replaceChildren(style, root);
   const status = root.querySelector("[data-status]");
   const loginButton = root.querySelector("[data-login]");
