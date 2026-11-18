@@ -84,6 +84,28 @@
       }
     },
     {
+      "id": "azure-devops-platform",
+      "version": "3.0.1",
+      "channel": "stable",
+      "tag": "azure-devops-platform-3.0.1",
+      "asset": {
+        "name": "azure-devops-platform-3.0.1.aicxt",
+        "url": "https://github.com/bojii-custom-harness/agent-system-extensions/releases/download/azure-devops-platform-3.0.1/azure-devops-platform-3.0.1.aicxt",
+        "sha256": "e68860bd68986ddf352e65ebcc989565c97dab37fd0887d88f59a0bca4c84695",
+        "size": 17636
+      },
+      "compatibility": {
+        "agentSystem": "*"
+      },
+      "metadata": {
+        "displayName": "Azure DevOps 平台",
+        "description": "保留 Organization、Project 設定與 Microsoft Entra SSO；提供單一受限的官方 Azure DevOps CLI Agent 工具。",
+        "package": {
+          "retirePreviousPluginContributions": true
+        }
+      }
+    },
+    {
       "id": "gitlab",
       "version": "2.0.0",
       "channel": "stable",
