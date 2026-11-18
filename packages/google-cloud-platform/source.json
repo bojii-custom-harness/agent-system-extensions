@@ -7,7 +7,7 @@
   "sourcePath": "backend/extension-packages/google-cloud-platform",
   "sourceTree": "5d615e29fced7a0aa776df07d30d155c88c6279f",
   "sourcePackageVersion": "2.3.9",
-  "releaseVersion": "2.0.3",
+  "releaseVersion": "2.0.4",
   "runtimeMigrationRevision": "46ce16fbce6e01c204dd0e136b729467bf230940",
   "notes": "GCP runtime 使用 agent-system 的 generic Extension data volume，設定位於 google-cloud-platform namespace；sourcePackageVersion 記錄原始套件版本，releaseVersion 使用本 repo 的獨立版本序列。"
 }

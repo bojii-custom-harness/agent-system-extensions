@@ -40,6 +40,17 @@ async function mountLoginExtension(page: import("@playwright/test").Page, apiImp
   )
 }
 
+test("缺少 CLI 的已安裝套件顯示準備步驟，且不啟動登入", async ({ page }) => {
+  await mountLoginExtension(page, `async (path) => {
+    if (path === "status") throw Object.assign(new Error("missing CLI"), { code: "GCP_RUNTIME_PREFLIGHT_FAILED" });
+    if (path === "legacy-cleanup") return { available: false };
+    throw new Error("unexpected operation");
+  }`)
+  await expect(page.locator("[data-status]")).toContainText("Extension 已安裝")
+  await expect(page.locator("[data-status]")).toContainText("Google Cloud CLI 558.0.0")
+  await expect(page.locator("[data-cleanup]")).toBeHidden()
+})
+
 test("Google login shows preparation, waits for authorization, and reports the Project login result", async ({ page }) => {
   await page.clock.install()
   await page.addInitScript(() => {

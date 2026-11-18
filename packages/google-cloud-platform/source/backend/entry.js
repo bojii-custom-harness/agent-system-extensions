@@ -35,8 +35,8 @@ export function createGoogleCloudPlatformBackend(host = {}, dependencies = {}) {
       const activeProject = requireProject(requestHost.project ?? project);
       const method = String(request.method).toUpperCase();
       if (method === "POST" && request.path === "install") {
-        const runtime = await preflightMainRuntime(activeProject, requestDocker, runtimeContainerName, { createProjectConfig: true });
-        return { headers: noStoreHeaders(), body: { project: activeProject, runtime: "main", state: "ready", version: runtime.version } };
+        // 套件安裝不等於 CLI 就緒；前置依賴由狀態／操作入口檢查，避免鎖死宿主安裝交易。
+        return { headers: noStoreHeaders(), body: { project: activeProject, runtime: "main", state: "installed" } };
       }
       if (method === "GET" && request.path === "status") {
         const runtime = await preflightMainRuntime(activeProject, requestDocker, runtimeContainerName, { createProjectConfig: true });
@@ -240,7 +240,7 @@ export function parseAuthorizationCallback(authorizationUrl) {
 async function preflightMainRuntime(project, requestDocker, containerName, { createProjectConfig }) {
   const runtime = await inspectMainRuntime(requestDocker, containerName);
   const configPath = projectConfigPath(runtime.configRoot, project);
-  const version = await executeRuntimeCommand(runtime, project, ["gcloud", "version"], requestDocker, containerName, { timeoutMs: 30_000 });
+  const version = await executeRuntimeCommand(runtime, project, ["/bin/sh", "-c", "command -v gcloud >/dev/null 2>&1 && exec gcloud version"], requestDocker, containerName, { timeoutMs: 30_000, allowFailure: true });
   if (version.exitCode !== 0 || !new RegExp(`Google Cloud SDK ${GOOGLE_CLOUD_CLI_VERSION.replaceAll(".", "\\.")}\\b`).test(version.output)) {
     throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "請先由使用者在 main runtime 執行套件的 runtime/install-gcloud.sh，安裝 Google Cloud CLI 558.0.0；宿主 image 不會自動下載。");
   }

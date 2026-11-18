@@ -1,6 +1,6 @@
 # Google Cloud Platform
 
-`2.0.3` 將 CLI wrapper、專案選擇器、安裝器與 runtime 整合測試完整移入本套件。宿主 image 不再預裝 gcloud，使用者請依 [`runtime 安裝說明`](source/runtime/README.md) 自行安裝。升級清理政策由 manifest metadata 宣告。
+`2.0.4` 將套件安裝與 runtime readiness 分開：缺少 gcloud 時仍可完成套件安裝，狀態與登入入口會明確提示準備 CLI，不再因前置檢查讓宿主安裝交易停在 `outcome-unknown`。`2.0.3` 將 CLI wrapper、專案選擇器、安裝器與 runtime 整合測試完整移入本套件。宿主 image 不預裝 gcloud，請依 [`runtime 安裝說明`](source/runtime/README.md) 安裝。升級清理政策由 manifest metadata 宣告；歷史失敗交易須確認回滾與副作用後再恢復。
 
 宿主整合驗證：設定 `AGENT_SYSTEM_BACKEND_ROOT` 為主 repo 的 `backend` 絕對路徑後執行 `npm run test:gcp-host`；需可執行 Docker Compose CLI，測試僅解析設定，不啟動容器。
 

@@ -8,7 +8,7 @@ import { buildExtensionPackage } from "../../../scripts/build-extension-packages
 import { buildBrowserRemoteUrl, createGoogleCloudPlatformBackend, parseAuthorizationCallback } from "../source/backend/entry.js";
 
 const packageRoot = fileURLToPath(new URL("../source/", import.meta.url));
-const archivePath = fileURLToPath(new URL("../google-cloud-platform-2.0.3.aicxt", import.meta.url));
+const archivePath = fileURLToPath(new URL("../google-cloud-platform-2.0.4.aicxt", import.meta.url));
 const expectedPackageFiles = [
   "backend/entry.js", "config/extension.json", "extension.json", "frontend/entry.js",
   "runtime/README.md", "runtime/gcloud-project-selector.mjs", "runtime/gcloud-wrapper.sh", "runtime/install-gcloud.sh",
@@ -27,13 +27,13 @@ test("GCP package archives the main-runtime login UI without the gcloud_cli cont
   const buildInfo = JSON.parse(await readFile(new URL("../build-info.json", import.meta.url), "utf8"));
   const archivedFiles = [...files.keys()].sort();
 
-  assert.equal(manifest.version, "2.0.3");
+  assert.equal(manifest.version, "2.0.4");
   assert.equal(manifest.scope, "project");
   assert.deepEqual(archivedFiles, expectedPackageFiles);
   assert.deepEqual(archive, builtArchive);
   assert.equal(archivedManifest.extensionId, "google-cloud-platform");
-  assert.equal(archivedManifest.version, "2.0.3");
-  assert.equal(buildInfo.version, "2.0.3");
+  assert.equal(archivedManifest.version, "2.0.4");
+  assert.equal(buildInfo.version, "2.0.4");
   assert.equal(buildInfo.artifact.sha256, createHash("sha256").update(archive).digest("hex"));
   assert.equal(manifest.resources, undefined);
   assert.equal(manifest.pluginContributions, undefined);
@@ -50,7 +50,7 @@ test("GCP package archives the main-runtime login UI without the gcloud_cli cont
   const frontend = files.get("frontend/entry.js")!.toString("utf8");
   const backend = files.get("backend/entry.js")!.toString("utf8");
   const configuration = JSON.parse(files.get("config/extension.json")!.toString("utf8")) as Record<string, any>;
-  assert.match(frontend, /version: "2\.0\.3"/);
+  assert.match(frontend, /version: "2\.0\.4"/);
   assert.match(frontend, /main runtime 的 gcloud listener 直接接收/);
   assert.match(frontend, /Project 設定目錄只是預設選擇，不是存取控制/);
   assert.match(frontend, /legacy-cleanup/);
@@ -72,7 +72,7 @@ test("install, status, login, cancel, and logout use only the selected Project c
   const otherBackend = createBackend(fixture, "other");
 
   const installed = await request(demoBackend, "POST", "install");
-  assert.deepEqual(installed.body, { project: "demo", runtime: "main", state: "ready", version: "558.0.0" });
+  assert.deepEqual(installed.body, { project: "demo", runtime: "main", state: "installed" });
   const initialStatus = await request(demoBackend, "GET", "status");
   assert.deepEqual(initialStatus.body, { authenticated: false, login: "idle", project: "demo", state: "ready" });
 
@@ -241,9 +241,23 @@ test("main runtime preflight fails closed on an unexpected gcloud version", asyn
   const fixture = createRuntimeFixture({ gcloudVersion: "999.0.0" });
   const backend = createBackend(fixture, "demo");
 
-  await assert.rejects(request(backend, "POST", "install"), (error: any) => error.code === "GCP_RUNTIME_PREFLIGHT_FAILED");
+  assert.equal((await request(backend, "POST", "install")).body.state, "installed");
+  await assert.rejects(request(backend, "GET", "status"), (error: any) => error.code === "GCP_RUNTIME_PREFLIGHT_FAILED");
   assertNoDedicatedGcloudContainerLifecycle(fixture.dockerCalls);
   assert.equal(fixture.projectConfigWrites.has("demo"), false);
+});
+
+test("缺少 CLI 時套件仍可安裝及重播，狀態檢查提供準備指引", async () => {
+  const fixture = createRuntimeFixture({ gcloudVersion: "missing" });
+  const backend = createBackend(fixture, "demo");
+  assert.equal((await request(backend, "POST", "install")).body.state, "installed");
+  assert.equal((await request(backend, "POST", "install")).body.state, "installed");
+  assert.equal(fixture.dockerCalls.length, 0);
+  await assert.rejects(request(backend, "GET", "status"), (error: any) =>
+    error.code === "GCP_RUNTIME_PREFLIGHT_FAILED" && error.message.includes("runtime/install-gcloud.sh"));
+  assert.equal(fixture.projectConfigWrites.has("demo"), false);
+  fixture.gcloudVersion = "558.0.0";
+  assert.equal((await request(backend, "GET", "status")).body.state, "ready");
 });
 
 test("legacy cleanup stays unavailable until the exact install transaction is complete", async () => {
@@ -431,7 +445,8 @@ function createRuntimeFixture(options: {
     const project = config?.split("/").at(-1) ?? "";
     const fullCommand = command.join(" ");
     if (fullCommand.includes("mkdir -p")) fixture.projectConfigWrites.add(project);
-    if (command[0] === "gcloud" && command[1] === "version") {
+    if (command[0] === "/bin/sh" && command[2] === "command -v gcloud >/dev/null 2>&1 && exec gcloud version") {
+      if (fixture.gcloudVersion === "missing") return { exitCode: 127, stdout: "", stderr: "" };
       return { exitCode: 0, stdout: `Google Cloud SDK ${fixture.gcloudVersion}\n`, stderr: "synthetic version diagnostic\n" };
     }
     if (command[0] === "gcloud" && command[1] === "auth" && command[2] === "list") {

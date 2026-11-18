@@ -8,7 +8,7 @@ import { readAicxtManifest } from "../packages/cli/src/zip.js";
 const EXTENSION_IDS = ["azure-devops-platform", "google-cloud-platform", "gitlab", "open-design", "xmind"];
 const RELEASE_VERSIONS = {
   "azure-devops-platform": "2.0.2",
-  "google-cloud-platform": "2.0.3",
+  "google-cloud-platform": "2.0.4",
   gitlab: "2.0.0",
   "open-design": "2.0.1",
   xmind: "2.0.1",
@@ -38,7 +38,7 @@ test("Ticket 02 publishes only the five formal Extension packages with source pr
       assert.equal(source.snapshotCommit, "ccf5672c8ef5c43abbc89896a98b0760bddf74ef");
       assert.equal(source.sourceContentCommit, "bc11548ad8a8d4b1d1ed68923570e8484390518f");
       assert.equal(source.sourcePackageVersion, "2.3.9");
-      assert.equal(source.releaseVersion, "2.0.3");
+      assert.equal(source.releaseVersion, "2.0.4");
     } else {
       assert.equal(source.snapshotCommit, "b3040627401c9fe6a6955051022f0e602d602398");
     }

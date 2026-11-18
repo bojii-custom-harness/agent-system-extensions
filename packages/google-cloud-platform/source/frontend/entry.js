@@ -3,7 +3,7 @@ const STYLE = `.gcp{display:grid;gap:16px;max-width:680px;margin:0 auto;padding:
 export async function activate(host) {
   return {
     extensionId: "google-cloud-platform",
-    version: "2.0.3",
+    version: "2.0.4",
     editor: { mount(container) { return mount(host, container); } },
   };
 }
@@ -79,8 +79,13 @@ function mount(host, container) {
         else if (result.login === "pending") showStatus("此 Project 的登入程序正在等待遠端瀏覽器授權。");
         else showStatus(`main OpenCode runtime 的 gcloud 已就緒，尚未登入（Project：${result.project}）。`);
       }
-    } catch {
-      if (!disposed && refreshAttempt === attempt && attempt === 0) { showStatus("無法檢查 main OpenCode runtime 的 gcloud 狀態。請確認 runtime 與 shared volume 預檢可用。", "error"); setRetry(true); }
+    } catch (error) {
+      if (!disposed && refreshAttempt === attempt && attempt === 0) {
+        showStatus(error?.code === "GCP_RUNTIME_PREFLIGHT_FAILED"
+          ? "Extension 已安裝，但 CLI 或 runtime 設定尚未就緒。請依套件 runtime/README.md 在 main 與 workflow-test 安裝 Google Cloud CLI 558.0.0，並確認共用資料 volume；完成後重新開啟此頁。"
+          : "無法檢查 main OpenCode runtime 的 gcloud 狀態。請確認 runtime 與 shared volume 預檢可用。", "error");
+        setRetry(true);
+      }
     }
   };
   const login = async () => {
