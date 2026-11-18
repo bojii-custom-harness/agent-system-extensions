@@ -7,6 +7,6 @@
   "sourcePath": "backend/extension-packages/azure-devops-platform",
   "sourceTree": "e7404d57766fb26b67657e090f1ef90aee2c170c",
   "sourcePackageVersion": "1.6.47",
-  "releaseVersion": "2.0.0",
+  "releaseVersion": "2.0.1",
   "notes": "封裝來源為固定 integration tree；sourceContentCommit 是此 package path 最後異動的原始 commit。"
 }
