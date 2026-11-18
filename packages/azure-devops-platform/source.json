@@ -7,6 +7,7 @@
   "sourcePath": "backend/extension-packages/azure-devops-platform",
   "sourceTree": "e7404d57766fb26b67657e090f1ef90aee2c170c",
   "sourcePackageVersion": "1.6.47",
-  "releaseVersion": "2.0.1",
-  "notes": "封裝來源為固定 integration tree；sourceContentCommit 是此 package path 最後異動的原始 commit。"
+  "releaseVersion": "2.0.2",
+  "policyMigrationRevision": "46ce16fbce6e01c204dd0e136b729467bf230940",
+  "notes": "sourceRevision／sourceTree 記錄 2.0.0 的來源基線；後續變更由此 repo 的 release tag 追蹤。2.0.2 將 Agent System dev 的 Azure DevOps 政策與專屬測試完整外移，policyMigrationRevision 為搬移前主 repo HEAD。"
 }

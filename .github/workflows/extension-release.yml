@@ -20,6 +20,7 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
+      - run: npm run typecheck:azure-devops
       - run: npm test
       - run: npm run extensions:verify
       - if: startsWith(github.ref_name, 'google-cloud-platform-')

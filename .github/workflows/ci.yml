@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: 24
       - run: node --version
+      - run: npm ci
+      - run: npm run typecheck:azure-devops
       - run: npm test
       - run: npm run fixture:verify
       - run: npm run extensions:verify

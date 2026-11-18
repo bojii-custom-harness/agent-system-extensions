@@ -6,13 +6,14 @@ import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
+import { build } from "esbuild";
 
 const execFile = promisify(execFileCallback);
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGES = join(ROOT, "packages");
 const EXTENSION_IDS = ["azure-devops-platform", "google-cloud-platform", "gitlab", "open-design", "xmind"];
 const RELEASE_VERSIONS = {
-  "azure-devops-platform": "2.0.1",
+  "azure-devops-platform": "2.0.2",
   "google-cloud-platform": "2.0.2",
   gitlab: "2.0.0",
   "open-design": "2.0.0",
@@ -30,6 +31,18 @@ export async function buildExtensionPackage(extensionId) {
   const packageRoot = join(PACKAGES, extensionId);
   const sourceRoot = join(packageRoot, "source");
   const files = await readTree(sourceRoot);
+  if (extensionId === "azure-devops-platform") {
+    const result = await build({
+      absWorkingDir: ROOT,
+      entryPoints: ["packages/azure-devops-platform/backend-module.ts"],
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node24",
+      write: false,
+    });
+    files.set("backend/entry.js", Buffer.from(result.outputFiles[0].contents));
+  }
   if (!files.has("extension.json")) throw new Error(`${extensionId} source is missing root extension.json`);
 
   if (extensionId === "xmind") await addGeneratedXmindWorkflows(packageRoot, files);
