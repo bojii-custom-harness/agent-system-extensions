@@ -167,6 +167,32 @@
       }
     },
     {
+      "id": "open-design",
+      "version": "2.0.1",
+      "channel": "stable",
+      "tag": "open-design-2.0.1",
+      "asset": {
+        "name": "open-design-2.0.1.aicxt",
+        "url": "https://github.com/bojii-custom-harness/agent-system-extensions/releases/download/open-design-2.0.1/open-design-2.0.1.aicxt",
+        "sha256": "d7043bea35e5cff12279c37bf93fadb9b8ea63b0fe9dbe77226f110609baa740",
+        "size": 10156
+      },
+      "compatibility": {
+        "agentSystem": "*"
+      },
+      "metadata": {
+        "displayName": "Open Design MCP",
+        "description": "使用官方 Open Design v0.18.0 GHCR image，按 Project 啟動獨立 container，並同步 BFF OpenCode provider 與 MCP。",
+        "package": {
+          "icon": "palette",
+          "canonicalId": "open-design",
+          "aliases": [
+            "opendesign"
+          ]
+        }
+      }
+    },
+    {
       "id": "xmind",
       "version": "2.0.0",
       "channel": "stable",
