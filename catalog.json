@@ -42,6 +42,26 @@
       }
     },
     {
+      "id": "azure-devops-platform",
+      "version": "2.0.2",
+      "channel": "stable",
+      "tag": "azure-devops-platform-2.0.2",
+      "asset": {
+        "name": "azure-devops-platform-2.0.2.aicxt",
+        "url": "https://github.com/bojii-custom-harness/agent-system-extensions/releases/download/azure-devops-platform-2.0.2/azure-devops-platform-2.0.2.aicxt",
+        "sha256": "16b1e66a4ae529640353e6e383a05795b910b8adf1b10bb05660a8c19a747c64",
+        "size": 128354
+      },
+      "compatibility": {
+        "agentSystem": "*"
+      },
+      "metadata": {
+        "displayName": "Azure DevOps 平台",
+        "description": "以 Extension 驗證 Azure DevOps PAT，並管理 Git Repository、Pull Request 查詢與建立、Pipeline YAML 提交、Pipeline 定義、預覽、明確執行及 run 狀態查詢、Work Item 建立、查詢、revision 歷史與更新、Wiki、Git 身分、Project、Team、Board、Iteration、AssignedTo 與 Dashboard。",
+        "package": {}
+      }
+    },
+    {
       "id": "gitlab",
       "version": "2.0.0",
       "channel": "stable",
