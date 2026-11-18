@@ -2,7 +2,7 @@
   "schemaVersion": "agent-system.extension-package.v1",
   "extensionId": "azure-devops-platform",
   "displayName": "Azure DevOps 平台",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "metadata": { "retirePreviousPluginContributions": true },
   "scope": "project",
   "retiredResources": [

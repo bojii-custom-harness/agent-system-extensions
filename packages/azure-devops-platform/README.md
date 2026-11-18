@@ -1,5 +1,9 @@
 # Azure DevOps Platform
 
+## 3.0.1：依 Organization 選擇登入租戶
+
+從 Azure DevOps challenge 讀取 `X-VSS-ResourceTenant`，瀏覽器登入指定 `az login --tenant`。已登入其他租戶時，前端顯示租戶不符並允許重新登入，不再只因取得任意租戶 token 就判定登入成功。無法辨識租戶時提供明確錯誤。
+
 Project-scoped Azure DevOps Extension 套件。`2.0.0` 首版依 [`source.json`](source.json) 記錄的 source tree 重建；backend、frontend、Project 設定、Plugin、Tools、Skills 與退役 MCP context migration 均由套件負責。
 
 ## 3.0.0：官方 CLI 與瀏覽器 SSO

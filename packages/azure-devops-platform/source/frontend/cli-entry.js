@@ -134,6 +134,9 @@ export async function mount(container, host, context = {}) {
       setStatus("等待 Microsoft 帳號完成瀏覽器登入…", "busy");
       cancelButton.hidden = false;
       schedulePoll();
+    } else if (result?.login === "tenant-mismatch") {
+      setStatus("CLI 登入的租戶與此 Organization 不同。請按「使用 Microsoft 帳號登入」，改以此 Organization 的租戶重新登入。", "error");
+      cancelButton.hidden = true;
     } else if (result?.login === "failed") {
       setStatus("登入未完成；可重新嘗試。", "error");
       cancelButton.hidden = true;

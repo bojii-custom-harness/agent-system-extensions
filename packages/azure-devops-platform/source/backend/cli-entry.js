@@ -10,18 +10,20 @@ const DEFAULT_NETWORK = "agent-system-main";
 const LOGIN_TTL_MS = 5 * 60 * 1000;
 const COMMAND_TIMEOUT_MS = 120_000;
 const OUTPUT_LIMIT_BYTES = 256 * 1024;
+const tenantCache = new Map();
 const SECRET_PATTERN = /(?:bearer\s+)[A-Za-z0-9._~+/=-]+|(["']?(?:pat|token|secret|password|authorization)["']?\s*[:=]\s*["']?)[A-Za-z0-9._~+/=-]{8,}/gi;
 
 export async function activate(_host = {}, dependencies = {}) {
   const docker = dependencies.docker || dockerRequest;
   const browser = dependencies.browser || browserRemoteRequest;
+  const resolveTenant = dependencies.resolveTenant || resolveOrganizationTenant;
   return {
     async handle({ host, request }) {
       if (request.method !== "POST") throw extensionError(405, "ADO_METHOD_NOT_ALLOWED", "Use POST.");
       const context = readTrustedContext(request);
       const action = String(request.path || "");
-      if (action === "status") return response(await readLoginStatus(host, context, docker, browser));
-      if (action === "login") return response(await startLogin(host, context, docker, browser));
+      if (action === "status") return response(await readLoginStatus(host, context, docker, browser, resolveTenant));
+      if (action === "login") return response(await startLogin(host, context, docker, browser, resolveTenant));
       if (action === "cancel") return response(await cancelLogin(host, context, docker, browser));
       if (action === "logout") return response(await logout(host, context, docker, browser));
       if (action === "projects") return response(await listProjects(host, context, docker));
@@ -117,13 +119,23 @@ async function runDevOps(host, context, body, docker) {
   };
 }
 
-async function readLoginStatus(host, context, docker, browser) {
+async function readLoginStatus(host, context, docker, browser, resolveTenant) {
   const runtime = await inspectRuntime(host, docker);
   const login = await findLoginContainer(runtime, context, docker);
   if (login?.state === "running") {
     return { authenticated: false, login: "pending", project: context.agentSystemProject, browserUrl: browserUrl(login.token) };
   }
-  const result = await runCommand(runtime, context, ["account", "get-access-token", "--resource", "499b84ac-1321-427f-aa17-267ca6975798", "--query", "expiresOn", "--output", "json"], docker, { allowFailure: true });
+  const tenant = await resolveTenant(context.organization);
+  const account = await runCommand(runtime, context, ["account", "show", "--query", "tenantId", "--output", "json"], docker, { allowFailure: true });
+  const accountTenant = account.exitCode === 0 ? parseJsonOutput(account.output, "ADO_AUTH_STATUS_INVALID", true) : undefined;
+  if (typeof accountTenant === "string" && accountTenant.toLowerCase() !== tenant) {
+    if (login) {
+      await removeContainer(docker, login.id);
+      await ignoreBrowserRequest(browser, "DELETE", `/sessions/${encodeURIComponent(login.token)}`);
+    }
+    return { authenticated: false, login: "tenant-mismatch", project: context.agentSystemProject };
+  }
+  const result = await runCommand(runtime, context, ["account", "get-access-token", "--tenant", tenant, "--resource", "499b84ac-1321-427f-aa17-267ca6975798", "--query", "expiresOn", "--output", "json"], docker, { allowFailure: true });
   const authenticated = result.exitCode === 0;
   if (login) {
     await removeContainer(docker, login.id);
@@ -132,12 +144,13 @@ async function readLoginStatus(host, context, docker, browser) {
   return { authenticated, login: authenticated ? "succeeded" : login ? "failed" : "idle", project: context.agentSystemProject };
 }
 
-async function startLogin(host, context, docker, browser) {
+async function startLogin(host, context, docker, browser, resolveTenant) {
   const runtime = await inspectRuntime(host, docker);
-  const status = await readLoginStatus(host, context, docker, browser);
+  const status = await readLoginStatus(host, context, docker, browser, resolveTenant);
   if (status.authenticated) return status;
   const existing = await findLoginContainer(runtime, context, docker);
   if (existing?.state === "running") return { authenticated: false, login: "pending", project: context.agentSystemProject, browserUrl: browserUrl(existing.token) };
+  const tenant = await resolveTenant(context.organization);
 
   const token = randomBytes(32).toString("base64url");
   const expiresAt = Date.now() + LOGIN_TTL_MS;
@@ -146,7 +159,7 @@ async function startLogin(host, context, docker, browser) {
   let created;
   try {
     created = await createContainer(runtime, context, containerName, [
-    "--signal=TERM", "--kill-after=5s", "300s", "/usr/bin/az", "login", "--allow-no-subscriptions", "--only-show-errors",
+    "--signal=TERM", "--kill-after=5s", "300s", "/usr/bin/az", "login", "--tenant", tenant, "--allow-no-subscriptions", "--only-show-errors",
   ], docker, {
     entrypoint: ["/usr/bin/timeout"],
     networkMode: `container:${runtime.containerName}`,
@@ -424,6 +437,32 @@ function projectConfigPath(context) {
 
 function organizationUrl(value) {
   return `https://dev.azure.com/${encodeURIComponent(value)}`;
+}
+
+export async function resolveOrganizationTenant(organization, request = fetch) {
+  validateOrganization(organization);
+  const cached = tenantCache.get(organization);
+  if (request === fetch && cached?.expiresAt > Date.now()) return cached.tenant;
+  let result;
+  try {
+    result = await request(`${organizationUrl(organization)}/_apis/projects?api-version=7.1`, {
+      headers: { Accept: "application/json", "X-TFS-FedAuthRedirect": "Suppress" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw extensionError(503, "ADO_TENANT_DISCOVERY_FAILED", "無法查詢 Organization 的登入租戶，請稍後重試。");
+  }
+  const tenant = result.headers.get("x-vss-resourcetenant")?.toLowerCase();
+  if (![200, 302, 401, 403].includes(result.status) || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(tenant || "")) {
+    throw extensionError(502, "ADO_TENANT_DISCOVERY_FAILED", "Azure DevOps 未提供有效的 Organization 租戶，請確認 Organization 名稱。");
+  }
+  await result.body?.cancel();
+  if (request === fetch) {
+    if (tenantCache.size >= 100) tenantCache.clear();
+    tenantCache.set(organization, { tenant, expiresAt: Date.now() + LOGIN_TTL_MS });
+  }
+  return tenant;
 }
 
 function validateOrganization(value) {
