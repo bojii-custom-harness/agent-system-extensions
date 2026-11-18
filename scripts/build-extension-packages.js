@@ -14,10 +14,10 @@ const PACKAGES = join(ROOT, "packages");
 const EXTENSION_IDS = ["azure-devops-platform", "google-cloud-platform", "gitlab", "open-design", "xmind"];
 const RELEASE_VERSIONS = {
   "azure-devops-platform": "2.0.2",
-  "google-cloud-platform": "2.0.2",
+  "google-cloud-platform": "2.0.3",
   gitlab: "2.0.0",
-  "open-design": "2.0.0",
-  xmind: "2.0.0",
+  "open-design": "2.0.1",
+  xmind: "2.0.1",
 };
 const CRC_TABLE = Array.from({ length: 256 }, (_, index) => {
   let value = index;

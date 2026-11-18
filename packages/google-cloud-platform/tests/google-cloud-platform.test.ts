@@ -8,8 +8,11 @@ import { buildExtensionPackage } from "../../../scripts/build-extension-packages
 import { buildBrowserRemoteUrl, createGoogleCloudPlatformBackend, parseAuthorizationCallback } from "../source/backend/entry.js";
 
 const packageRoot = fileURLToPath(new URL("../source/", import.meta.url));
-const archivePath = fileURLToPath(new URL("../google-cloud-platform-2.0.2.aicxt", import.meta.url));
-const expectedPackageFiles = ["backend/entry.js", "config/extension.json", "extension.json", "frontend/entry.js"];
+const archivePath = fileURLToPath(new URL("../google-cloud-platform-2.0.3.aicxt", import.meta.url));
+const expectedPackageFiles = [
+  "backend/entry.js", "config/extension.json", "extension.json", "frontend/entry.js",
+  "runtime/README.md", "runtime/gcloud-project-selector.mjs", "runtime/gcloud-wrapper.sh", "runtime/install-gcloud.sh",
+];
 const runtimeName = "synthetic-main-runtime";
 const runtimeExtensionDataRoot = "/var/lib/agent-system/extensions";
 const runtimeConfigRoot = `${runtimeExtensionDataRoot}/google-cloud-platform/projects`;
@@ -24,13 +27,13 @@ test("GCP package archives the main-runtime login UI without the gcloud_cli cont
   const buildInfo = JSON.parse(await readFile(new URL("../build-info.json", import.meta.url), "utf8"));
   const archivedFiles = [...files.keys()].sort();
 
-  assert.equal(manifest.version, "2.0.2");
+  assert.equal(manifest.version, "2.0.3");
   assert.equal(manifest.scope, "project");
   assert.deepEqual(archivedFiles, expectedPackageFiles);
   assert.deepEqual(archive, builtArchive);
   assert.equal(archivedManifest.extensionId, "google-cloud-platform");
-  assert.equal(archivedManifest.version, "2.0.2");
-  assert.equal(buildInfo.version, "2.0.2");
+  assert.equal(archivedManifest.version, "2.0.3");
+  assert.equal(buildInfo.version, "2.0.3");
   assert.equal(buildInfo.artifact.sha256, createHash("sha256").update(archive).digest("hex"));
   assert.equal(manifest.resources, undefined);
   assert.equal(manifest.pluginContributions, undefined);
@@ -47,7 +50,7 @@ test("GCP package archives the main-runtime login UI without the gcloud_cli cont
   const frontend = files.get("frontend/entry.js")!.toString("utf8");
   const backend = files.get("backend/entry.js")!.toString("utf8");
   const configuration = JSON.parse(files.get("config/extension.json")!.toString("utf8")) as Record<string, any>;
-  assert.match(frontend, /version: "2\.0\.2"/);
+  assert.match(frontend, /version: "2\.0\.3"/);
   assert.match(frontend, /main runtime 的 gcloud listener 直接接收/);
   assert.match(frontend, /Project 設定目錄只是預設選擇，不是存取控制/);
   assert.match(frontend, /legacy-cleanup/);

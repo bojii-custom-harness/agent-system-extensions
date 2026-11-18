@@ -15,6 +15,9 @@
     "workflows/workflow-xmind-plan.json"
   ],
   "metadata": {
+    "fileAssociations": [".xmind"],
+    "attachmentConversionRequired": true,
+    "icon": "mindmap",
     "installMode": "workflow-command-extend",
     "packageFormat": ".aicxt",
     "workflowId": "workflow-xmind",

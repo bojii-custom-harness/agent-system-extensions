@@ -9,6 +9,7 @@
   "scripts": {
     "typecheck:azure-devops": "tsc -p packages/azure-devops-platform/tsconfig.json",
     "test:host": "node scripts/run-extension-host-tests.js",
+    "test:gcp-host": "node --test --test-timeout=120000 packages/google-cloud-platform/host-tests/gcloud-runtime.integration.mjs",
     "test": "node --test && node --experimental-strip-types --test packages/google-cloud-platform/tests/google-cloud-platform.test.ts",
     "test:gcp-ui": "playwright test --config=playwright.gcp.config.ts",
     "fixture:build": "node scripts/build-synthetic-fixture.js",

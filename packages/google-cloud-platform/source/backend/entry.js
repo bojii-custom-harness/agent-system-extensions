@@ -242,7 +242,7 @@ async function preflightMainRuntime(project, requestDocker, containerName, { cre
   const configPath = projectConfigPath(runtime.configRoot, project);
   const version = await executeRuntimeCommand(runtime, project, ["gcloud", "version"], requestDocker, containerName, { timeoutMs: 30_000 });
   if (version.exitCode !== 0 || !new RegExp(`Google Cloud SDK ${GOOGLE_CLOUD_CLI_VERSION.replaceAll(".", "\\.")}\\b`).test(version.output)) {
-    throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "The main runtime does not provide the required Google Cloud CLI version.");
+    throw extensionError(503, "GCP_RUNTIME_PREFLIGHT_FAILED", "請先由使用者在 main runtime 執行套件的 runtime/install-gcloud.sh，安裝 Google Cloud CLI 558.0.0；宿主 image 不會自動下載。");
   }
   if (createProjectConfig) {
     const result = await executeRuntimeCommand(runtime, project, ["/bin/sh", "-lc", 'test ! -L "$CLOUDSDK_CONFIG" && mkdir -p -- "$CLOUDSDK_CONFIG" && test ! -L "$CLOUDSDK_CONFIG" && test -d "$CLOUDSDK_CONFIG" && test -w "$CLOUDSDK_CONFIG"'], requestDocker, containerName, { timeoutMs: 15_000 });

@@ -3,7 +3,7 @@ const STYLE = `.gcp{display:grid;gap:16px;max-width:680px;margin:0 auto;padding:
 export async function activate(host) {
   return {
     extensionId: "google-cloud-platform",
-    version: "2.0.2",
+    version: "2.0.3",
     editor: { mount(container) { return mount(host, container); } },
   };
 }
