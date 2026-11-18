@@ -7,7 +7,7 @@ import { readAicxtManifest } from "../packages/cli/src/zip.js";
 
 const EXTENSION_IDS = ["azure-devops-platform", "google-cloud-platform", "gitlab", "open-design", "xmind"];
 const RELEASE_VERSIONS = {
-  "azure-devops-platform": "2.0.2",
+  "azure-devops-platform": "3.0.0",
   "google-cloud-platform": "2.0.4",
   gitlab: "2.0.0",
   "open-design": "2.0.1",
@@ -51,7 +51,7 @@ test("each deterministic build matches its tracked release archive and manifest"
     const version = RELEASE_VERSIONS[extensionId];
     const { archive, manifest } = await buildExtensionPackage(extensionId);
     const tracked = await readFile(await packagePath(extensionId, `${extensionId}-${version}.aicxt`));
-    assert.deepEqual(archive, tracked, `${extensionId} archive must be reproducible`);
+    assert.ok(archive.equals(tracked), `${extensionId} archive is stale; run npm run extensions:build -- ${extensionId}`);
     assert.equal(manifest.extensionId, extensionId);
     assert.equal(manifest.version, version);
     const unpacked = readAicxtManifest(archive);

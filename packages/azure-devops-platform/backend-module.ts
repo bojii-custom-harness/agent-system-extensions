@@ -1,2 +1,1 @@
-export { activate } from "./source/backend/entry.js";
-export { prepareRequest, normalizeSettings, runtimeContext } from "./policy/hooks.js";
+export { activate, normalizeSettings, prepareRequest, runtimeContext } from "./source/backend/cli-entry.js";

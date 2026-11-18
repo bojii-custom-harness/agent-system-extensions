@@ -2,7 +2,15 @@
 
 Project-scoped Azure DevOps Extension 套件。`2.0.0` 首版依 [`source.json`](source.json) 記錄的 source tree 重建；backend、frontend、Project 設定、Plugin、Tools、Skills 與退役 MCP context migration 均由套件負責。
 
-Backend 會先驗證 PAT，再保存至受保護的 Extension secret store。Runtime Project identity 由 Agent System host 提供，不從未信任的 Tool input 推導。
+## 3.0.0：官方 CLI 與瀏覽器 SSO
+
+前端保留 Organization、Project 與 Microsoft Entra SSO。舊工具與專用 Skill 退役，Agent 使用 `azure_devops_cli` 傳入 `az devops` 後的 argv；`invoke` 可使用帳號在該 Organization 的權限。Project 是預設 context，不是權限邊界。
+
+部署前先依 [`runtime/README.md`](runtime/README.md) 建置獨立 CLI image（Azure CLI 2.93.0、azure-devops 1.0.11）。CLI 不依賴 backend／OpenCode image 內的安裝；登入由共用瀏覽器完成，設定保存在 Project 專屬目錄，既有設定與秘密儲存不刪除。
+
+宿主安裝交易會同步 Plugin 到 main 與 workflow-test，兩邊使用同一 Project 設定與 CLI backend。需要支援 backend hooks 及 `retirePreviousPluginContributions` 的宿主。獨立測試使用 `npm test`，Plugin 型別檢查使用 `npm run typecheck:azure-devops`。
+
+以下為 2.x 歷史說明；`policy/` 與舊 `host-tests/` 僅記錄原工具行為，不包含於 3.0.0 封裝。
 
 ## 2.0.2：完成來源與政策拆分
 

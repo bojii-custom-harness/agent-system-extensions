@@ -13,7 +13,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PACKAGES = join(ROOT, "packages");
 const EXTENSION_IDS = ["azure-devops-platform", "google-cloud-platform", "gitlab", "open-design", "xmind"];
 const RELEASE_VERSIONS = {
-  "azure-devops-platform": "2.0.2",
+  "azure-devops-platform": "3.0.0",
   "google-cloud-platform": "2.0.4",
   gitlab: "2.0.0",
   "open-design": "2.0.1",
@@ -41,7 +41,7 @@ export async function buildExtensionPackage(extensionId) {
       target: "node24",
       write: false,
     });
-    files.set("backend/entry.js", Buffer.from(result.outputFiles[0].contents));
+    files.set("backend/cli-entry.js", Buffer.from(result.outputFiles[0].contents));
   }
   if (!files.has("extension.json")) throw new Error(`${extensionId} source is missing root extension.json`);
 
