@@ -128,6 +128,28 @@
       }
     },
     {
+      "id": "azure-devops-platform",
+      "version": "4.0.0",
+      "channel": "stable",
+      "tag": "azure-devops-platform-4.0.0",
+      "asset": {
+        "name": "azure-devops-platform-4.0.0.aicxt",
+        "url": "https://github.com/bojii-custom-harness/agent-system-extensions/releases/download/azure-devops-platform-4.0.0/azure-devops-platform-4.0.0.aicxt",
+        "sha256": "270f2ba50905d735789e9a7267a63314602f9d9de7f27662a9789c426ec5137e",
+        "size": 16942
+      },
+      "compatibility": {
+        "agentSystem": "*"
+      },
+      "metadata": {
+        "displayName": "Azure DevOps 平台",
+        "description": "Organization、Project 與 Microsoft Entra SSO；main 與 workflow-test 的 Agent 直接從 shell 使用 Azure CLI，依 Project 共用登入狀態。",
+        "package": {
+          "retirePreviousPluginContributions": true
+        }
+      }
+    },
+    {
       "id": "gitlab",
       "version": "2.0.0",
       "channel": "stable",
