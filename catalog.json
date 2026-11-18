@@ -142,6 +142,29 @@
       }
     },
     {
+      "id": "google-cloud-platform",
+      "version": "2.0.3",
+      "channel": "stable",
+      "tag": "google-cloud-platform-2.0.3",
+      "asset": {
+        "name": "google-cloud-platform-2.0.3.aicxt",
+        "url": "https://github.com/bojii-custom-harness/agent-system-extensions/releases/download/google-cloud-platform-2.0.3/google-cloud-platform-2.0.3.aicxt",
+        "sha256": "d9927f8cca2fa87f891e6a385377f5c852473c696d347e1371e622d0d2986213",
+        "size": 17788
+      },
+      "compatibility": {
+        "agentSystem": "*"
+      },
+      "metadata": {
+        "displayName": "Google Cloud Platform",
+        "description": "Project-scoped Google Cloud login controls using the main OpenCode runtime and generic Extension data volume; general gcloud operations run through shell.",
+        "package": {
+          "projectOnlyMcp": true,
+          "retirePreviousPluginContributions": true
+        }
+      }
+    },
+    {
       "id": "open-design",
       "version": "2.0.0",
       "channel": "stable",
