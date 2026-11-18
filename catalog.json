@@ -223,6 +223,43 @@
           "extendResources": true
         }
       }
+    },
+    {
+      "id": "xmind",
+      "version": "2.0.1",
+      "channel": "stable",
+      "tag": "xmind-2.0.1",
+      "asset": {
+        "name": "xmind-2.0.1.aicxt",
+        "url": "https://github.com/bojii-custom-harness/agent-system-extensions/releases/download/xmind-2.0.1/xmind-2.0.1.aicxt",
+        "sha256": "20ddbe4037b2ccc9f0043b8985c2c866cb4eb9c4062f6451f0620356dd4db96b",
+        "size": 34953
+      },
+      "compatibility": {
+        "agentSystem": "*"
+      },
+      "metadata": {
+        "displayName": "XMind",
+        "description": "XMind .xmind 讀取、轉 Markdown、安全編輯與 AI 節點延伸 Agent package。",
+        "package": {
+          "fileAssociations": [
+            ".xmind"
+          ],
+          "attachmentConversionRequired": true,
+          "icon": "mindmap",
+          "installMode": "workflow-command-extend",
+          "packageFormat": ".aicxt",
+          "workflowId": "workflow-xmind",
+          "capabilities": [
+            "xmind.read",
+            "xmind.to-markdown",
+            "xmind.edit",
+            "xmind.generate",
+            "xmind.plan"
+          ],
+          "extendResources": true
+        }
+      }
     }
   ]
 }
