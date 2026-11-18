@@ -15,4 +15,7 @@ RUN apt-get update \
     && /usr/local/bin/install-azure-cli-runtime.sh \
     && rm -f /usr/local/bin/install-azure-cli-runtime.sh
 
+COPY patch-entra-auth.py /usr/local/share/azure-devops-cli-runtime/patch-entra-auth.py
+RUN /opt/az/bin/python3 /usr/local/share/azure-devops-cli-runtime/patch-entra-auth.py
+
 ENTRYPOINT ["/usr/bin/az"]

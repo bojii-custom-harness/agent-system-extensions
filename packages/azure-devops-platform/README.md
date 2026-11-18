@@ -1,5 +1,9 @@
 # Azure DevOps Platform
 
+## 3.0.2：修正 Microsoft 個人帳號 guest 的 TF400813
+
+已確認正確租戶及有效 token 仍可能被官方 SDK 的 `X-VSS-ForceMsaPassThrough: true` 解讀為另一個 MSA 使用者。獨立 runtime image 的固定版本相容性修補關閉此預設，保留 Entra 租戶身分。部署需重新建置 [`runtime/`](runtime/README.md) image；不需刪除登入資料或重新登入。
+
 ## 3.0.1：依 Organization 選擇登入租戶
 
 從 Azure DevOps challenge 讀取 `X-VSS-ResourceTenant`，瀏覽器登入指定 `az login --tenant`。已登入其他租戶時，前端顯示租戶不符並允許重新登入，不再只因取得任意租戶 token 就判定登入成功。無法辨識租戶時提供明確錯誤。

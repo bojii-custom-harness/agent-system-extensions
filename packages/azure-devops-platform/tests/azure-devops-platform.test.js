@@ -6,7 +6,7 @@ const source = new URL("../source/", import.meta.url);
 
 test("Azure DevOps Extension exposes only the CLI tool and ships its entry points", async () => {
   const manifest = JSON.parse(await readFile(new URL("extension.json", source), "utf8"));
-  assert.equal(manifest.version, "3.0.1");
+  assert.equal(manifest.version, "3.0.2");
   assert.equal(manifest.backend.entry, "backend/cli-entry.js");
   assert.equal(manifest.frontend.entry, "frontend/cli-entry.js");
   assert.deepEqual(manifest.pluginContributions[0].contributions, [{ kind: "tool", name: "azure_devops_cli" }]);

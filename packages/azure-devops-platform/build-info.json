@@ -1,14 +1,14 @@
 {
   "extensionId": "azure-devops-platform",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "channel": "stable",
-  "tag": "azure-devops-platform-3.0.1",
+  "tag": "azure-devops-platform-3.0.2",
   "sourceRevision": "b3040627401c9fe6a6955051022f0e602d602398",
   "sourceTree": "e7404d57766fb26b67657e090f1ef90aee2c170c",
   "sourcePath": "backend/extension-packages/azure-devops-platform",
   "artifact": {
-    "name": "azure-devops-platform-3.0.1.aicxt",
+    "name": "azure-devops-platform-3.0.2.aicxt",
     "size": 17636,
-    "sha256": "e68860bd68986ddf352e65ebcc989565c97dab37fd0887d88f59a0bca4c84695"
+    "sha256": "3be0049ea1d693ed2c93a5288f5c742cc901e1eebbc06c10c2e64864644a5404"
   }
 }
