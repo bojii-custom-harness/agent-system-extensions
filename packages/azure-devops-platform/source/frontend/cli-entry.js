@@ -26,13 +26,13 @@ export async function mount(container, host, context = {}) {
   root.setAttribute("aria-label", "Azure DevOps CLI settings");
   const projectName = typeof context.projectName === "string" ? context.projectName : "目前 Project";
   root.innerHTML = `
-    <header><h1>Azure DevOps</h1><p class="ado-cli-note">Organization 與 Azure DevOps Project 設定及 Microsoft Entra SSO。Agent 透過官方 Azure DevOps CLI 執行命令。</p></header>
+    <header><h1>Azure DevOps</h1><p class="ado-cli-note">Organization 與 Azure DevOps Project 設定及 Microsoft Entra SSO。Agent 在 Project 目錄透過 shell 直接執行 az；main 與 workflow-test 共用此 Project 的登入狀態。</p></header>
     <section class="ado-cli-card">
       <h2>Organization 與 Project</h2>
       <label class="ado-cli-field">Organization<input data-organization autocomplete="organization" placeholder="contoso" required></label>
       <label class="ado-cli-field">Azure DevOps Project<select data-project><option value="">請先登入並載入 Projects</option></select></label>
       <div class="ado-cli-actions"><button data-save type="button">儲存設定</button><span data-settings-status class="ado-cli-status" role="status" aria-live="polite"></span></div>
-      <p class="ado-cli-note">此設定作為 Agent 的預設 CLI context。<code>az devops invoke</code> 仍可存取目前登入帳號在該 Organization 具權限的其他資源；Project 選擇不是安全隔離。</p>
+      <p class="ado-cli-note">此設定作為 shell 的 CLI 預設值，可執行 <code>az devops</code>、<code>az repos</code>、<code>az boards</code> 與其他 az 命令。CLI 參數可覆寫預設值；Project 選擇不是安全隔離。</p>
     </section>
     <section class="ado-cli-card">
       <h2>Microsoft Entra SSO</h2>
@@ -72,6 +72,7 @@ export async function mount(container, host, context = {}) {
     const current = isRecord(settings.azureDevOps) ? settings.azureDevOps : {};
     settings.azureDevOps = { ...current, ...patch };
     await host.api.writeExtensionSettings(settings, "project");
+    if (settings.azureDevOps.organization) await call("configure");
   };
 
   async function loadSaved() {

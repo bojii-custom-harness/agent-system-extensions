@@ -27,7 +27,7 @@ export async function activate(_host = {}, dependencies = {}) {
       if (action === "cancel") return response(await cancelLogin(host, context, docker, browser));
       if (action === "logout") return response(await logout(host, context, docker, browser));
       if (action === "projects") return response(await listProjects(host, context, docker));
-      if (action === "run-cli") return response(await runDevOps(host, context, request.body, docker));
+      if (action === "configure") return response(await configureDefaults(host, context, docker));
       throw extensionError(404, "ADO_PATH_NOT_FOUND", "Azure DevOps CLI request path was not found.");
     },
   };
@@ -60,21 +60,6 @@ export function normalizeSettings(settings) {
   return isRecord(settings) ? settings : {};
 }
 
-export function validateArguments(value) {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 100
-    || value.some((item) => typeof item !== "string" || !item || item.length > 8_192 || item.includes("\0"))
-    || value.reduce((total, item) => total + item.length, 0) > 64 * 1024) {
-    throw extensionError(400, "ADO_CLI_ARGUMENTS_INVALID", "Provide a bounded array of Azure DevOps CLI arguments.");
-  }
-  if (value.some((item) => /^--?(?:org|organization|project)(?:=|$)/i.test(item) || /^-p$/i.test(item))) {
-    throw extensionError(400, "ADO_CLI_CONTEXT_OVERRIDE_DENIED", "Organization and Project are selected in the Extension settings and cannot be overridden in command arguments.");
-  }
-  if (!["admin", "extension", "invoke", "project", "security", "service-endpoint", "team", "user", "wiki"].includes(value[0])) {
-    throw extensionError(400, "ADO_CLI_COMMAND_DENIED", "Use an Azure DevOps service command; authentication and CLI configuration are managed by the Extension.");
-  }
-  return [...value];
-}
-
 function readTrustedContext(request) {
   const context = request?.trustedContext;
   if (!isRecord(context)) throw extensionError(400, "ADO_CONTEXT_REQUIRED", "Configure an Azure DevOps Organization and Project first.");
@@ -86,6 +71,7 @@ function readTrustedContext(request) {
 }
 
 async function listProjects(host, context, docker) {
+  await configureDefaults(host, context, docker);
   const runtime = await inspectRuntime(host, docker);
   const result = await runCommand(runtime, context, ["devops", "project", "list", "--org", organizationUrl(context.organization), "--output", "json"], docker);
   const parsed = parseJsonOutput(result.output, "ADO_PROJECT_LIST_INVALID");
@@ -98,25 +84,14 @@ async function listProjects(host, context, docker) {
   })).filter((item) => item.name) };
 }
 
-async function runDevOps(host, context, body, docker) {
-  if (!context.adoProject) throw extensionError(400, "ADO_PROJECT_REQUIRED", "Select an Azure DevOps Project first.");
-  const args = validateArguments(body?.arguments);
+async function configureDefaults(host, context, docker) {
   const runtime = await inspectRuntime(host, docker);
-  const command = [
-    "devops",
-    ...args,
-    "--org",
-    organizationUrl(context.organization),
-  ];
-  if (!args.some((item) => item === "--output" || item === "-o" || item.startsWith("--output="))) {
-    command.push("--output", "json");
-  }
-  const result = await runCommand(runtime, context, command, docker, { timeoutMs: COMMAND_TIMEOUT_MS });
-  return {
-    exitCode: result.exitCode,
-    output: redactOutput(result.output).slice(0, OUTPUT_LIMIT_BYTES),
-    truncated: result.output.length > OUTPUT_LIMIT_BYTES,
-  };
+  await runCommand(runtime, context, [
+    "devops", "configure", "--defaults",
+    `organization=${organizationUrl(context.organization)}`,
+    `project=${context.adoProject || ""}`,
+  ], docker);
+  return { configured: true };
 }
 
 async function readLoginStatus(host, context, docker, browser, resolveTenant) {

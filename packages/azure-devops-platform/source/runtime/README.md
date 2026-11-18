@@ -1,36 +1,30 @@
-# 手動安裝 Azure CLI
+# Project shell 的 Azure CLI
 
-Azure CLI 與官方 `azure-devops` CLI extension 的版本及安裝入口由本擴充套件管理。Agent System 的 backend／OpenCode image 不再下載或預裝它們；使用者需要時自行下載及執行安裝。
-
-## Debian bookworm 容器
-
-將本目錄的 `install-azure-cli-runtime.sh` 與 `azure-cli-versions.env` 一起下載或複製至需要使用 Azure CLI 的容器，以 root 執行：
+將**整個本目錄**複製到 main 與 workflow-test 的 Debian bookworm 容器，分別以 root 執行：
 
 ```sh
 sh ./install-azure-cli-runtime.sh
 ```
 
-此命令會從 Microsoft 官方來源下載 Azure CLI `2.93.0` 及官方 `azure-devops` extension `1.0.11`，核對版本並檢查命令可用性。需要 `curl`、`gnupg`、`ca-certificates`；目前 backend／OpenCode image 已包含這些工具。安裝不會登入帳號。
+安裝器提供 Azure CLI 2.93.0、官方 azure-devops 1.0.11、Entra guest SDK 相容性修補及 `/usr/local/bin/az` 入口。可重複執行，不會刪除既有 Project 登入資料。流程與 gcloud 的外部套件手動安裝一致；容器重新建立後需重新執行安裝器，或在部署自有衍生 image 的建置中執行同一入口。
 
-請在使用 Azure CLI 的程序環境設定：
-
-```sh
-export AZURE_EXTENSION_DIR=/opt/agent-system/azure-cli/extensions
-export AZURE_EXTENSION_USE_DYNAMIC_INSTALL=no
-```
-
-以 Compose 啟動時，請將這兩項設定加入需要 CLI 的 service `environment`，讓服務程序也取得相同設定。backend、OpenCode main 與 workflow-test 是不同容器，需要分別安裝；僅在主機安裝不會提供給容器使用。容器重新建立後需重新安裝，或由使用者自行維護已安裝的衍生 image。
-
-`AZURE_CONFIG_DIR` 仍由各 Project 的登入流程指定，不應設為部署共用的登入目錄。
-
-## 其他作業系統
-
-依 [Microsoft 官方安裝文件](https://learn.microsoft.com/cli/azure/install-azure-cli) 自行下載 Azure CLI，再手動執行：
+## 直接使用
 
 ```sh
-az extension add --name azure-devops --version 1.0.11
-az version
-az extension show --name azure-devops
+cd /workspace/projects/123
+az devops project list --detect false
+az repos list --detect false
+az boards work-item show --id 2938
 ```
 
-請使用上述 `AZURE_EXTENSION_DIR` 設定（其他作業系統可自行指定可寫入的絕對路徑），並在安裝與實際服務程序中使用相同路徑。
+workflow-test 使用 `/workflow/projects/123`。Project 子目錄也會自動對應到：
+
+```text
+/var/lib/agent-system/extensions/azure-devops-platform/projects/123/.azure
+```
+
+兩個 runtime 已掛載共用資料，因此沿用前端 SSO 的登入狀態，不需重登。前端儲存 Organization／Project 時，透過官方 `az devops configure` 同步共用的 CLI 預設值；命令仍可明確覆寫。`az` 的所有命令群組皆可用，不再受原 `azure_devops_cli` 工具的 argv 限制。
+
+不在 managed Project 目錄時，需明確設定非空、絕對路徑的 `AZURE_CONFIG_DIR`。Wrapper 自動設定 `AZURE_EXTENSION_DIR`；請勿將部署級 `AZURE_CONFIG_DIR` 固定為某個 Project。
+
+Project selector 只是預設值選擇，不提供 shell 程序間的憑證存取隔離。具 shell 權限的 Agent 可依既有系統權限使用 CLI 與資料。

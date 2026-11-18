@@ -30,7 +30,7 @@ test("Docker 日誌保持繁體中文與多 frame 的 UTF-8 位元組", () => {
   assert.equal(decodeDockerStream(Buffer.concat([frame("專案"), frame("✓")])), "專案✓");
 });
 
-test("invoke 經實際 handler 使用 argv、Project 預設與原 volume subpath，完成後移除容器", async () => {
+test("configure 經實際 handler 將前端預設寫至共用 profile，使用原 volume subpath 並清理容器", async () => {
   const calls = [];
   const id = "a".repeat(64);
   const docker = async (method, path, body) => {
@@ -49,16 +49,21 @@ test("invoke 經實際 handler 使用 argv、Project 預設與原 volume subpath
     throw new Error(`未預期呼叫 ${method} ${path}`);
   };
   const runtime = await activate({}, { docker });
-  const request = prepareRequest({ method: "POST", path: "run-cli", body: { arguments: ["invoke", "--area", "core", "-o", "json"] } }, {
+  const request = prepareRequest({ method: "POST", path: "configure" }, {
     project: "fixture", settings: { azureDevOps: { organization: "contoso", project: "專案" } },
   });
   const result = await runtime.handle({ host: { project: "fixture" }, request });
-  assert.equal(result.body.output, '{"name":"專案"}');
+  assert.equal(result.body.configured, true);
   const payload = calls.find((call) => call.path.startsWith("/containers/create")).body;
-  assert.deepEqual(payload.Cmd, ["devops", "invoke", "--area", "core", "-o", "json", "--org", "https://dev.azure.com/contoso"]);
+  assert.deepEqual(payload.Cmd, ["devops", "configure", "--defaults", "organization=https://dev.azure.com/contoso", "project=專案"]);
   assert.ok(payload.Env.includes("AZURE_DEVOPS_EXT__DEFAULTS_PROJECT=專案"));
   assert.deepEqual(payload.HostConfig.Mounts[0].VolumeOptions, { Subpath: "extensions" });
   assert.equal(calls.at(-1).method, "DELETE");
+  await runtime.handle({ host: { project: "fixture" }, request: prepareRequest({ method: "POST", path: "configure" }, {
+    project: "fixture", settings: { azureDevOps: { organization: "another-org" } },
+  }) });
+  const cleared = calls.filter((call) => call.path.startsWith("/containers/create")).at(-1).body;
+  assert.equal(cleared.Cmd.at(-1), "project=");
 });
 
 test("Organization 租戶只取 Azure DevOps challenge，不跟隨登入重新導向", async () => {

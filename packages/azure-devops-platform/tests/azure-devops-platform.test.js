@@ -4,23 +4,19 @@ import test from "node:test";
 
 const source = new URL("../source/", import.meta.url);
 
-test("Azure DevOps Extension exposes only the CLI tool and ships its entry points", async () => {
+test("Azure DevOps Extension 提供 shell 設定介面，不再發布 Agent tools", async () => {
   const manifest = JSON.parse(await readFile(new URL("extension.json", source), "utf8"));
-  assert.equal(manifest.version, "3.0.2");
+  assert.equal(manifest.version, "4.0.0");
   assert.equal(manifest.backend.entry, "backend/cli-entry.js");
   assert.equal(manifest.frontend.entry, "frontend/cli-entry.js");
-  assert.deepEqual(manifest.pluginContributions[0].contributions, [{ kind: "tool", name: "azure_devops_cli" }]);
-  assert.ok(!manifest.workflowNodes.some(({ type }) => type === "resource.skill"));
-  assert.ok(manifest.resources.plugins[0].files.every((path) => !/clone|pull|push|repository|workitem|pipeline/i.test(path)));
+  assert.equal(manifest.pluginContributions, undefined);
+  assert.equal(manifest.resources, undefined);
+  assert.equal(manifest.workflowNodes, undefined);
+  assert.equal(manifest.metadata.retirePreviousPluginContributions, true);
 });
 
-test("Azure DevOps CLI arguments are bounded and cannot override selected context", async () => {
-  const { validateArguments, prepareRequest } = await import(new URL("backend/cli-entry.js", source));
-  assert.deepEqual(validateArguments(["project", "list"]), ["project", "list"]);
-  assert.throws(() => validateArguments(["project", "list", "--org", "other"]), (error) => error.code === "ADO_CLI_CONTEXT_OVERRIDE_DENIED");
-  assert.throws(() => validateArguments(["--project=other"]), (error) => error.code === "ADO_CLI_CONTEXT_OVERRIDE_DENIED");
-  assert.deepEqual(validateArguments(["invoke", "--http-method", "GET"]), ["invoke", "--http-method", "GET"]);
-  assert.throws(() => validateArguments([]), (error) => error.code === "ADO_CLI_ARGUMENTS_INVALID");
+test("SSO 仍由可信 Project context 決定，舊 run-cli 入口退役", async () => {
+  const { activate, prepareRequest } = await import(new URL("backend/cli-entry.js", source));
   const prepared = prepareRequest({ method: "POST", path: "status" }, {
     project: "trusted-project",
     settings: { azureDevOps: { organization: "ExampleOrg", project: "Team Project", token: "legacy data is retained" } },
@@ -31,6 +27,8 @@ test("Azure DevOps CLI arguments are bounded and cannot override selected contex
     adoProject: "Team Project",
   });
   assert.equal(prepared.trustedContext.token, undefined);
+  const runtime = await activate({}, { docker: () => { throw new Error("不可執行任意命令"); } });
+  await assert.rejects(runtime.handle({ host: {}, request: { ...prepared, path: "run-cli", body: { arguments: ["project", "list"] } } }), { code: "ADO_PATH_NOT_FOUND" });
 });
 
 test("Azure DevOps UI keeps Organization and Project settings without PAT configuration", async () => {

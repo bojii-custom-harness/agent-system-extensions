@@ -9,6 +9,10 @@ versions_file=${1:-"$script_dir/azure-cli-versions.env"}
 : "${AZURE_DEVOPS_EXTENSION_VERSION:?AZURE_DEVOPS_EXTENSION_VERSION is required}"
 
 export AZURE_EXTENSION_DIR="${AZURE_EXTENSION_DIR:-/opt/agent-system/azure-cli/extensions}"
+export AZURE_LOGGING_ENABLE_LOG_FILE=false
+test "$(id -u)" = 0 || { echo "請以 root 執行安裝。" >&2; exit 1; }
+apt-get update
+apt-get install -y --no-install-recommends ca-certificates curl gnupg
 install -d -m 0755 "$AZURE_EXTENSION_DIR"
 
 . /etc/os-release
@@ -37,22 +41,26 @@ EOF
 apt-get update
 apt-get install -y --no-install-recommends "azure-cli=${AZURE_CLI_VERSION}-1~bookworm"
 
-installed_cli_version=$(az version --query '"azure-cli"' --output tsv --only-show-errors)
+installed_cli_version=$(/usr/bin/az version --query '"azure-cli"' --output tsv --only-show-errors)
 if [ "$installed_cli_version" != "$AZURE_CLI_VERSION" ]; then
   printf 'Expected Azure CLI %s, got %s.\n' "$AZURE_CLI_VERSION" "$installed_cli_version" >&2
   exit 1
 fi
-az --version
+/usr/bin/az --version
 
-az extension add --name azure-devops --version "$AZURE_DEVOPS_EXTENSION_VERSION" --yes --only-show-errors
-installed_extension_version=$(az extension show --name azure-devops --query version --output tsv --only-show-errors)
+/usr/bin/az extension add --name azure-devops --version "$AZURE_DEVOPS_EXTENSION_VERSION" --yes --only-show-errors
+installed_extension_version=$(/usr/bin/az extension show --name azure-devops --query version --output tsv --only-show-errors)
 if [ "$installed_extension_version" != "$AZURE_DEVOPS_EXTENSION_VERSION" ]; then
   printf 'Expected azure-devops extension %s, got %s.\n' "$AZURE_DEVOPS_EXTENSION_VERSION" "$installed_extension_version" >&2
   exit 1
 fi
 
-az devops --help >/dev/null
-login_help=$(az login --help)
+/opt/az/bin/python3 "$script_dir/patch-entra-auth.py"
+/usr/bin/az devops --help >/dev/null
+login_help=$(/usr/bin/az login --help)
 printf '%s\n' "$login_help" | grep -F -- '--allow-no-subscriptions' >/dev/null
 
 rm -rf /var/lib/apt/lists/*
+install -d -m 0755 /usr/local/libexec
+install -m 0644 "$script_dir/azure-project-selector.mjs" /usr/local/libexec/azure-project-selector.mjs
+install -m 0755 "$script_dir/az-wrapper.sh" /usr/local/bin/az

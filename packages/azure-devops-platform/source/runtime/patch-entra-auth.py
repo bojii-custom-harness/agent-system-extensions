@@ -7,9 +7,10 @@ client = root / "azext_devops/devops_sdk/client.py"
 source = client.read_text(encoding="utf-8")
 old = "self._force_msa_pass_through = True"
 new = "self._force_msa_pass_through = False"
-if source.count(old) != 1:
+if source.count(old) == 1:
+    client.write_text(source.replace(old, new), encoding="utf-8")
+elif source.count(new) != 1:
     raise RuntimeError("Azure DevOps SDK 與固定版本的修補契約不符")
-client.write_text(source.replace(old, new), encoding="utf-8")
 
 # 載入實際 SDK，確認修補結果而不發送網路請求。
 sys.path.insert(0, str(root))

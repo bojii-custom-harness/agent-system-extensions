@@ -2,7 +2,7 @@
   "schemaVersion": "agent-system.extension-package.v1",
   "extensionId": "azure-devops-platform",
   "displayName": "Azure DevOps 平台",
-  "version": "3.0.2",
+  "version": "4.0.0",
   "metadata": { "retirePreviousPluginContributions": true },
   "scope": "project",
   "retiredResources": [
@@ -17,7 +17,7 @@
       }
     }
   ],
-  "description": "保留 Organization、Project 設定與 Microsoft Entra SSO；提供單一受限的官方 Azure DevOps CLI Agent 工具。",
+  "description": "Organization、Project 與 Microsoft Entra SSO；main 與 workflow-test 的 Agent 直接從 shell 使用 Azure CLI，依 Project 共用登入狀態。",
   "backend": {
     "entry": "backend/cli-entry.js",
     "integrity": {
@@ -35,34 +35,5 @@
     "integrity": {
       "config/extension.json": "sha256-b745844e0e091b62a24e3a29492dc733111cdcaa6f8d091c88e31f6ecf00256e"
     }
-  },
-  "resources": {
-    "plugins": [
-      {
-        "files": [
-          "plugins/azure-devops-platform/agent/context.ts",
-          "plugins/azure-devops-platform/azure-devops-platform.ts"
-        ],
-        "path": "plugins/azure-devops-platform.ts",
-        "integrity": "sha256-PLACEHOLDER"
-      }
-    ]
-  },
-  "pluginContributions": [
-    {
-      "pluginName": "azure-devops-platform",
-      "contributions": [
-        {
-          "kind": "tool",
-          "name": "azure_devops_cli"
-        }
-      ]
-    }
-  ],
-  "workflowNodes": [
-    {
-      "type": "resource.plugin",
-      "name": "azure-devops-platform"
-    }
-  ]
+  }
 }

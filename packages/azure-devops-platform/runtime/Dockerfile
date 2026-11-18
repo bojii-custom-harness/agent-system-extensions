@@ -4,9 +4,9 @@ LABEL org.opencontainers.image.source="https://github.com/bojii-custom-harness/a
 
 ENV AZURE_EXTENSION_DIR=/opt/agent-system/azure-cli/extensions
 
-COPY azure-cli-versions.env /usr/local/share/azure-devops-cli-runtime/azure-cli-versions.env
-COPY install-azure-cli-runtime.sh /usr/local/bin/install-azure-cli-runtime.sh
-COPY azure-devops-browser-remote.mjs /usr/local/bin/azure-devops-browser-remote
+COPY runtime/azure-cli-versions.env /usr/local/share/azure-devops-cli-runtime/azure-cli-versions.env
+COPY runtime/install-azure-cli-runtime.sh /usr/local/bin/install-azure-cli-runtime.sh
+COPY runtime/azure-devops-browser-remote.mjs /usr/local/bin/azure-devops-browser-remote
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
@@ -15,7 +15,7 @@ RUN apt-get update \
     && /usr/local/bin/install-azure-cli-runtime.sh \
     && rm -f /usr/local/bin/install-azure-cli-runtime.sh
 
-COPY patch-entra-auth.py /usr/local/share/azure-devops-cli-runtime/patch-entra-auth.py
+COPY source/runtime/patch-entra-auth.py /usr/local/share/azure-devops-cli-runtime/patch-entra-auth.py
 RUN /opt/az/bin/python3 /usr/local/share/azure-devops-cli-runtime/patch-entra-auth.py
 
 ENTRYPOINT ["/usr/bin/az"]

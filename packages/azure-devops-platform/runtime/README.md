@@ -2,10 +2,12 @@
 
 此 image 僅供 Azure DevOps Platform Extension 建立一次性 CLI 容器使用；不安裝到 Agent System backend 或 OpenCode runtime image。
 
-在 Docker 主機上，從此目錄建置固定版本的本機 image：
+SSO 控制介面使用此 image。Agent 一般命令改由 main／workflow-test 的原生 shell 執行，安裝入口見 [`../source/runtime/README.md`](../source/runtime/README.md)。
+
+在 Docker 主機上，從 `packages/azure-devops-platform` 目錄建置固定版本的本機 image：
 
 ```sh
-docker build --tag agent-system-extensions/azure-devops-cli-runtime:local .
+docker build --file runtime/Dockerfile --tag agent-system-extensions/azure-devops-cli-runtime:local .
 ```
 
 `azure-cli-versions.env` 固定 Azure CLI 與官方 `azure-devops` Extension 版本。建置程序會從 Microsoft 套件來源安裝並驗證版本及 `az devops` 命令群組。
@@ -18,4 +20,4 @@ Extension 透過 Docker socket 建立受限的一次性容器，將 Project 專�
 
 官方 azure-devops 1.0.11 SDK 預設送出 `X-VSS-ForceMsaPassThrough: true`，可能把已登入正確 Entra 租戶的 Microsoft 個人帳號 guest 解讀為原始 MSA 身分，造成 TF400813。此 image 在建置時以 `patch-entra-auth.py` 關閉該 SDK 預設；CLI、token 取得、權限與命令仍由官方實作負責。
 
-修補嚴格比對固定版 SDK 的單一設定，版本結構不符即停止建置，並實際載入 SDK 驗證。既有部署需重新 build 此獨立 image；不需要刪除憑證或重新登入。
+修補由 `source/runtime/patch-entra-auth.py` 共用，嚴格比對固定版 SDK 的單一設定，版本結構不符即停止建置，並實際載入 SDK 驗證。既有部署需重新 build 此獨立 image；不需要刪除憑證或重新登入。

@@ -1,5 +1,13 @@
 # Azure DevOps Platform
 
+## 4.0.0：Agent 直接使用 shell
+
+移除 `azure_devops_cli` Tool／Plugin 與 `run-cli` backend 入口。Agent 從 managed Project 工作目錄直接執行 `az`，支援 `az devops`、`az repos`、`az boards` 及完整 Azure CLI 命令群組。
+
+前端維持 Organization、Project、SSO；main 與 workflow-test 共用既有 Project profile。前端設定同步成官方 CLI defaults，SSO 的 tenant 與 MSA 修正保留。請依 [`source/runtime/README.md`](source/runtime/README.md) 在兩個 runtime 執行安裝器，與 gcloud 的手動安裝方式相同。
+
+升級 metadata 會退役原 Plugin 及 Tool，不刪除登入資料。下方章節為歷史版本說明。
+
 ## 3.0.2：修正 Microsoft 個人帳號 guest 的 TF400813
 
 已確認正確租戶及有效 token 仍可能被官方 SDK 的 `X-VSS-ForceMsaPassThrough: true` 解讀為另一個 MSA 使用者。獨立 runtime image 的固定版本相容性修補關閉此預設，保留 Entra 租戶身分。部署需重新建置 [`runtime/`](runtime/README.md) image；不需刪除登入資料或重新登入。
